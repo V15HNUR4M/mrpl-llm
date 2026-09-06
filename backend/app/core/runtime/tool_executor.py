@@ -25,6 +25,7 @@ from app.core.runtime.schemas import ToolRequest, ToolResult
 class AuthorizationPolicy(str, Enum):
     PUBLIC = "public"
     AUTHENTICATED = "authenticated"
+    ADMIN = "admin"
 
 # ---------------------------------------------------------------------------
 # ToolDefinition
@@ -255,6 +256,18 @@ class AuthorizedToolExecutor(ToolExecutor):
                 status="error",
                 metadata={"error_type": "authorization_error"}
             )
+
+        if tool and tool.authorization_policy == AuthorizationPolicy.ADMIN:
+            role = context.get("role", "")
+            if role != "ADMIN":
+                dur = int((time.time() - t0) * 1000)
+                await self._audit(user_id, "tool_execution_denied", tool_name, "denied", context)
+                await self._emit_telemetry("tool.execution.denied", tool_name, user_id, "denied", context, duration_ms=dur, error_type="authorization_error")
+                return ToolResult(
+                    output=f"Tool '{tool_name}' requires administrative privileges.",
+                    status="error",
+                    metadata={"error_type": "authorization_error"}
+                )
 
         # Emit start audit & telemetry
         await self._audit(user_id, "tool_execution_started", tool_name, "started", context)

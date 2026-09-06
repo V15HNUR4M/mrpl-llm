@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.errors import MRPLAPIException, mrpl_exception_handler
 from app.db.database import engine, Base
-from app.api.v1.endpoints import auth, conversations, messages, generation, agents, knowledge, workflows, attachments, observability
+from app.api.v1.endpoints import (
+    auth, conversations, messages, generation, agents, knowledge,
+    workflows, attachments, observability, evaluation, health
+)
 from app.services.auth import AuthService
 from app.db.uow import UnitOfWork, get_uow
 from app.core.model_gateway.gateway import ModelGateway
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
     
     local_tool_executor = LocalToolExecutor(tool_registry)
     authorized_tool_executor = AuthorizedToolExecutor(local_tool_executor)
+    app.state.authorized_tool_executor = authorized_tool_executor
 
     # Initialize Agent Registry
     registry = AgentRegistry()
@@ -141,22 +145,54 @@ async def lifespan(app: FastAPI):
             })
             await uow.commit()
 
+    # Initialize Workflow, Memory, and Multimodal services on app.state
+    from app.core.workflow.engine import WorkflowEngine
+    from app.services.semantic_memory import MemoryService
+    from app.core.multimodal.service import MultimodalService
+    app.state.uow = uow
+    app.state.workflow_engine = WorkflowEngine(uow, app.state.agent_harness, authorized_tool_executor)
+    app.state.memory_service = MemoryService(uow)
+    app.state.multimodal_service = MultimodalService(uow)
+
     yield
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs" if settings.ENABLE_OPENAPI else None,
+    redoc_url="/redoc" if settings.ENABLE_OPENAPI else None,
+    openapi_url="/openapi.json" if settings.ENABLE_OPENAPI else None,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.add_exception_handler(MRPLAPIException, mrpl_exception_handler)
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self' http://localhost:* http://127.0.0.1:* ws:; "
+        "frame-ancestors 'none';"
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -170,9 +206,11 @@ async def add_request_id(request: Request, call_next):
     response.headers["X-Correlation-ID"] = correlation_id
     return response
 
-# Abstraction for Background Tasks
+# Abstraction for Background Tasks - Gated in production
 @app.post(f"{settings.API_V1_STR}/test_background_task")
 async def test_background_task(background_tasks: BackgroundTasks):
+    if not settings.ENABLE_TEST_ENDPOINTS:
+        raise MRPLAPIException(code="NOT_FOUND", message="Endpoint not found", status_code=404)
     from app.core.tasks import TaskQueue
     queue = TaskQueue(background_tasks)
 
@@ -186,6 +224,10 @@ async def test_background_task(background_tasks: BackgroundTasks):
     queue.enqueue(background_job)
     return {"status": "Accepted for async processing"}
 
+# Health probes (both at /health/live and /api/v1/health/live for orchestrator / client flexibility)
+app.include_router(health.router, prefix="/health", tags=["health"])
+app.include_router(health.router, prefix=f"{settings.API_V1_STR}/health", tags=["health"])
+
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(conversations.router, prefix=f"{settings.API_V1_STR}/conversations", tags=["conversations"])
 app.include_router(messages.router, prefix=f"{settings.API_V1_STR}/conversations/{{conversation_id}}/messages", tags=["messages"])
@@ -195,3 +237,4 @@ app.include_router(knowledge.router, prefix=f"{settings.API_V1_STR}/knowledge", 
 app.include_router(workflows.router, prefix=f"{settings.API_V1_STR}/workflows", tags=["workflows"])
 app.include_router(attachments.router, prefix=f"{settings.API_V1_STR}/attachments", tags=["attachments"])
 app.include_router(observability.router, prefix=f"{settings.API_V1_STR}/observability", tags=["observability"])
+app.include_router(evaluation.router, prefix=f"{settings.API_V1_STR}/evaluation", tags=["evaluation"])

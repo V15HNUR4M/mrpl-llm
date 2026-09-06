@@ -11,7 +11,7 @@ class AuthService:
 
     async def authenticate_user(self, username: str, password: str) -> Optional[dict]:
         user = await self.uow.users.get_by_username(username)
-        if not user:
+        if not user or not user.is_active:
             return None
         if not verify_password(password, user.password_hash):
             return None

@@ -240,10 +240,12 @@ class RAGService:
             
             active_versions_map = {}
             if version_ids_in_results:
-                stmt = select(DocumentVersion.id).where(
+                stmt = select(DocumentVersion.id).join(Document, Document.id == DocumentVersion.document_id).where(
                     DocumentVersion.id.in_(version_ids_in_results),
                     DocumentVersion.is_current == True
                 )
+                if query.owner_id:
+                    stmt = stmt.where(Document.owner_id == query.owner_id)
                 res = await session.execute(stmt)
                 active_versions_map = {row[0]: True for row in res.all()}
                 
@@ -251,8 +253,8 @@ class RAGService:
                 vid = r.document_version_id
                 if vid and vid in active_versions_map:
                     valid_results.append(r)
-                elif not vid:
-                    # Fallback for chunks inserted before versioning was added
+                elif not vid and not query.owner_id:
+                    # Fallback for unowned legacy chunks inserted before versioning was added
                     valid_results.append(r)
 
         results_to_return = valid_results[:query.top_k]

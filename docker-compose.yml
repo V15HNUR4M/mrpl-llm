@@ -1,16 +1,89 @@
 version: '3.8'
 
 services:
+  ollama:
+    # Pinned image version (Ollama 0.33.3 / sha256:32931b46719f673c05fdbaa81ccb26da18ea4a1c57590a754874ab28ba269eb2)
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.33.3}
+    container_name: mrpl_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - mrpl_ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - mrpl_network
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: mrpl_backend
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend/app:/app/app
-      - ./backend/data:/app/data
     environment:
-      - SQLITE_URL=sqlite+aiosqlite:///./data/mrpl.db
-      - SECRET_KEY=test-secret-key-12345
+      - ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY:-production-secret-key-32-chars-minimum-mrpl}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER:-admin}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD:-ProductionAdmin2026!Secure}
+      - SQLITE_URL=sqlite+aiosqlite:////app/data/mrpl.db
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - DEFAULT_CHAT_MODEL=llama3.2:latest
+      - DEFAULT_EMBEDDING_MODEL=nomic-embed-text
+      - EMBEDDING_PROVIDER=ollama
+      - UPLOAD_DIR=/app/data/uploads
+      - ATTACHMENT_DIR=/app/data/attachments
+      - VECTOR_DB_PATH=/app/data/chroma
+      - ENABLE_OPENAPI=${ENABLE_OPENAPI:-false}
+      - ENABLE_TEST_ENDPOINTS=${ENABLE_TEST_ENDPOINTS:-false}
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://localhost:80","http://127.0.0.1:80"]
+    volumes:
+      - mrpl_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - mrpl_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mrpl_frontend
     restart: unless-stopped
+    ports:
+      - "3000:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - mrpl_network
+
+volumes:
+  mrpl_data:
+    name: mrpl_data
+  mrpl_ollama_data:
+    name: mrpl_ollama_data
+
+networks:
+  mrpl_network:
+    name: mrpl_network
+    driver: bridge

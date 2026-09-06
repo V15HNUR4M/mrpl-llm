@@ -36,3 +36,13 @@ async def get_current_user(
         if not user.is_active:
             raise MRPLAPIException("AUTH_FORBIDDEN", "Inactive user", 403)
         return user
+
+async def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if str(current_user.role) != "ADMIN":
+        raise MRPLAPIException(
+            code="AUTH_FORBIDDEN",
+            message="Administrative privileges required",
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+    return current_user
+

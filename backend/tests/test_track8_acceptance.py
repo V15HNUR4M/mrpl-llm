@@ -87,8 +87,10 @@ def make_engine(uow) -> tuple:
     gateway = ModelGateway()
     # Using dummy Fake provider behavior
     from app.providers.fake import FakeProvider
+    from app.core.config import settings
     gateway.register_provider("fake", FakeProvider())
     gateway.register_model_route("test-model", "fake")
+    gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "fake")
     
     ctx_engine = ContextEngine()
     harness = AgentHarness(agent_registry, ctx_engine, gateway, auth_exec)

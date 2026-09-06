@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Database, Bot, LogOut, Activity } from 'lucide-react';
+import { MessageSquare, Database, Bot, LogOut, Activity, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import styles from './AppShell.module.css';
 
@@ -42,6 +42,13 @@ export const AppShell: React.FC = () => {
           >
             <Activity className={styles.navIcon} />
             Observability
+          </NavLink>
+          <NavLink 
+            to="/evaluation" 
+            className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
+          >
+            <ShieldCheck className={styles.navIcon} />
+            Evaluation
           </NavLink>
           <NavLink 
             to="/agents" 
