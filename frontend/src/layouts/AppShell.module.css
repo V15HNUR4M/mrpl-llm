@@ -1,0 +1,111 @@
+.appContainer {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 260px;
+  background-color: var(--color-primary-900);
+  color: var(--color-text-inverted);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-primary-800);
+}
+
+.sidebarHeader {
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--color-primary-800);
+}
+
+.sidebarHeader h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-inverted);
+}
+
+.nav {
+  flex: 1;
+  padding: var(--spacing-4) var(--spacing-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  transition: all var(--transition-fast);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.navLink:hover {
+  background-color: var(--color-primary-800);
+  color: var(--color-text-inverted);
+}
+
+.navLinkActive {
+  background-color: var(--color-primary-800);
+  color: var(--color-text-inverted);
+}
+
+.navIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.sidebarFooter {
+  padding: var(--spacing-4);
+  border-top: 1px solid var(--color-primary-800);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+}
+
+.userName {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.userRole {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.logoutBtn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: var(--spacing-1);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.logoutBtn:hover {
+  background-color: var(--color-primary-800);
+  color: var(--color-text-inverted);
+}
+
+.mainContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-surface-sunken);
+  overflow: hidden;
+}
