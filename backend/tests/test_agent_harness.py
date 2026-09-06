@@ -57,8 +57,9 @@ async def test_harness_happy_path(base_setup):
     
     gateway = ModelGateway()
     mock_provider = MockModelProvider(["This is the final answer."])
+    from app.core.config import settings
     gateway.register_provider("mock", mock_provider)
-    gateway.register_model_route("qwen2.5:latest", "mock")
+    gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "mock")
     
     harness = AgentHarness(registry, context_engine, gateway, tool_executor)
     session = RuntimeSession(session_id="1", conversation_id="1", agent_id="test_agent", agent_version="1.0", user_id="1")
@@ -78,8 +79,9 @@ async def test_harness_tool_call(base_setup):
         {"name": "search_documents", "arguments": {"query": "test"}},
         'Here is what I found.'
     ])
+    from app.core.config import settings
     gateway.register_provider("mock", mock_provider)
-    gateway.register_model_route("qwen2.5:latest", "mock")
+    gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "mock")
     
     harness = AgentHarness(registry, context_engine, gateway, tool_executor)
     session = RuntimeSession(session_id="2", conversation_id="1", agent_id="test_agent", agent_version="1.0", user_id="1")
@@ -102,8 +104,9 @@ async def test_harness_iteration_limit(base_setup):
         {"name": "search_documents", "arguments": {"query": "test"}},
         {"name": "search_documents", "arguments": {"query": "test"}}
     ])
+    from app.core.config import settings
     gateway.register_provider("mock", mock_provider)
-    gateway.register_model_route("qwen2.5:latest", "mock")
+    gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "mock")
     
     harness = AgentHarness(registry, context_engine, gateway, tool_executor)
     session = RuntimeSession(session_id="3", conversation_id="1", agent_id="test_agent", agent_version="1.0", user_id="1")
@@ -127,8 +130,9 @@ async def test_harness_timeout(base_setup):
         async def list_models(self): pass
 
     gateway = ModelGateway()
+    from app.core.config import settings
     gateway.register_provider("slow", SlowProvider())
-    gateway.register_model_route("qwen2.5:latest", "slow")
+    gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "slow")
     
     harness = AgentHarness(registry, context_engine, gateway, tool_executor)
     session = RuntimeSession(session_id="4", conversation_id="1", agent_id="test_agent", agent_version="1.0", user_id="1")

@@ -1,4 +1,4 @@
-export const API_BASE_URL = 'http://localhost:8000/api/v1';
+export const API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
 
 export class APIError extends Error {
   status: number;
@@ -21,7 +21,7 @@ export async function fetchClient<T>(endpoint: string, options: RequestInit = {}
     headers.set('Authorization', `Bearer ${token}`);
   }
   
-  if (!(options.body instanceof FormData)) {
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
 

@@ -67,6 +67,9 @@ class TextChunker:
                 chunks.append(chunk)
                 chunk_index += 1
             
+            if end >= text_length:
+                break
+
             # Advance start by chunk_size - overlap, but ensure we always move forward
             step = end - start - self.chunk_overlap
             if step <= 0:

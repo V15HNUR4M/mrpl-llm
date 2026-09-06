@@ -19,10 +19,11 @@ from app.core.runtime.harness import AgentHarness
 # RAG specific imports
 from app.core.rag.parser import ParserRegistry
 from app.core.rag.chunking import TextChunker
-from app.core.rag.embeddings import FakeEmbeddingProvider
+from app.core.rag.embeddings import FakeEmbeddingProvider, OllamaEmbeddingProvider
 from app.core.rag.vector_store import ChromaVectorStore
 from app.core.rag.service import RAGService
 from app.core.rag.tools import SearchDocumentsTool, GetDocumentTool
+from app.core.runtime.tool_executor import ToolRegistry, LocalToolExecutor, AuthorizedToolExecutor
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,8 +39,17 @@ async def lifespan(app: FastAPI):
     parser_registry = ParserRegistry()
     chunker = TextChunker(chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP)
     
-    # We use FakeEmbeddingProvider for tests. In a real environment we could use OllamaEmbeddingProvider
-    embedding_provider = FakeEmbeddingProvider()
+    # Use configured embedding provider - no silent fallbacks in runtime
+    if settings.EMBEDDING_PROVIDER == "ollama":
+        embedding_provider = OllamaEmbeddingProvider(
+            model=settings.DEFAULT_EMBEDDING_MODEL,
+            base_url=settings.OLLAMA_BASE_URL
+        )
+    elif settings.EMBEDDING_PROVIDER == "fake":
+        embedding_provider = FakeEmbeddingProvider()
+    else:
+        raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {settings.EMBEDDING_PROVIDER}")
+
     vector_store = ChromaVectorStore()
     
     rag_service = RAGService(
@@ -56,15 +66,23 @@ async def lifespan(app: FastAPI):
     tool_registry.register(GetDocumentTool(rag_service))
     
     local_tool_executor = LocalToolExecutor(tool_registry)
+    authorized_tool_executor = AuthorizedToolExecutor(local_tool_executor)
 
     # Initialize Agent Registry
     registry = AgentRegistry()
     registry.register(AgentDefinition(
         agent_id="general_agent",
         name="General Agent",
-        description="A general purpose AI assistant",
+        description="A general purpose AI assistant with knowledge base access",
         version="1.0",
-        instructions="You are a helpful general assistant."
+        instructions=(
+            "You are a helpful assistant for the MRPL plant system. When the user asks about equipment, pumps, "
+            "inspections, maintenance, or procedures, answer accurately and comprehensively using ONLY the facts present "
+            "in the provided reference context. Do not fabricate or extrapolate information. If the provided reference "
+            "documents do not contain the answer, state clearly that the indexed knowledge base does not contain this information."
+        ),
+        tool_permissions={"allowed": ["search_documents", "get_document"]},
+        context_policy={"rag": True}
     ))
     registry.register(AgentDefinition(
         agent_id="analysis_agent",
@@ -72,7 +90,8 @@ async def lifespan(app: FastAPI):
         description="Analyzes data and reports",
         version="1.0",
         instructions="You analyze provided data and use tools.",
-        tool_permissions={"allowed": ["search_documents"]}
+        tool_permissions={"allowed": ["search_documents", "get_document"]},
+        context_policy={"rag": True}
     ))
     registry.register(AgentDefinition(
         agent_id="disabled_agent",
@@ -89,15 +108,20 @@ async def lifespan(app: FastAPI):
         name="Document Agent",
         description="Knowledge base assistant",
         version="1.0",
-        instructions="You are a helpful assistant that answers questions based on the provided retrieved context. Use the search_documents tool to query knowledge.",
-        tool_permissions={"allowed": ["search_documents", "get_document"]}
+        instructions=(
+            "You are a helpful assistant that answers questions based on the provided retrieved context. "
+            "Always base your responses strictly on the retrieved documents. If the reference context does not "
+            "contain the answer, state clearly that the indexed knowledge base does not contain this information."
+        ),
+        tool_permissions={"allowed": ["search_documents", "get_document"]},
+        context_policy={"rag": True}
     ))
     
     app.state.agent_registry = registry
     
-    # Initialize Harness
+    # Initialize Harness with AuthorizedToolExecutor
     context_engine = ContextEngine()
-    app.state.agent_harness = AgentHarness(registry, context_engine, gateway, local_tool_executor)
+    app.state.agent_harness = AgentHarness(registry, context_engine, gateway, authorized_tool_executor)
 
     # Initialize DB
     async with engine.begin() as conn:

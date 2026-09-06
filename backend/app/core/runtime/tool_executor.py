@@ -316,18 +316,18 @@ class AuthorizedToolExecutor(ToolExecutor):
         if not self.uow:
             return
         try:
-            await self.uow.audit.create({
-                "user_id": user_id or None,
-                "action": action,
-                "resource_type": "tool",
-                "resource_id": tool_name,
-                "result": result,
-                "metadata_": {
-                    "session_id": context.get("session_id"),
-                    "agent_id": context.get("agent_id"),
-                }
-            })
-            await self.uow.commit()
+            async with self.uow as uow:
+                await uow.audit.create({
+                    "user_id": user_id or None,
+                    "action": action,
+                    "resource_type": "tool",
+                    "resource_id": tool_name,
+                    "result": result,
+                    "metadata_": {
+                        "session_id": context.get("session_id"),
+                        "agent_id": context.get("agent_id"),
+                    }
+                })
         except Exception:
             # Audit failure MUST NOT block tool execution (fail-open for availability)
             pass

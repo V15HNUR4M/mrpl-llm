@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     
     # Model Gateway Configuration
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    DEFAULT_CHAT_MODEL: str = "qwen2.5:latest"
+    DEFAULT_CHAT_MODEL: str = "llama3.2:latest"
     DEFAULT_EMBEDDING_MODEL: str = "nomic-embed-text"
+    EMBEDDING_PROVIDER: str = "ollama"
     
     # Admin User for init
     FIRST_SUPERUSER: str = "admin"

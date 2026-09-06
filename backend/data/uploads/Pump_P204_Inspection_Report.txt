@@ -1,0 +1,27 @@
+PUMP P204 INSPECTION REPORT
+Asset: Pump P204
+Inspection Date: 2026-08-18
+
+GENERAL CONDITION
+Pump P204 was operational during inspection. The casing was intact with no visible external cracks. Minor oil staining was observed around the bearing housing.
+
+BEARING CONDITION
+The drive-end bearing showed elevated vibration compared with the normal operating condition. A faint abnormal bearing noise was also reported. Bearing lubrication should be checked and the bearing condition monitored closely.
+
+SEAL CONDITION
+Minor leakage was observed near the mechanical seal. The leakage was not severe enough to require immediate shutdown, but the seal should be inspected during the next planned maintenance window.
+
+VIBRATION
+Measured vibration was higher than the normal baseline at the drive end. Possible causes include bearing wear, coupling misalignment, or imbalance.
+
+TEMPERATURE
+Bearing temperature was elevated but remained below the alarm threshold during the inspection.
+
+RECOMMENDATIONS
+- Inspect and lubricate the drive-end bearing.
+- Check coupling alignment.
+- Inspect the mechanical seal for degradation.
+- Continue monitoring vibration and bearing temperature.
+- Escalate for corrective maintenance if vibration or temperature continues to increase.
+
+Overall assessment: Pump P204 can remain in service with increased monitoring, subject to maintenance follow-up.

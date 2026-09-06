@@ -36,6 +36,67 @@ class AgentHarness:
         session.add_event("context_assembled", {"token_budget": package.token_budget})
         return package
 
+    async def _perform_rag_retrieval(
+        self,
+        session: RuntimeSession,
+        agent: AgentDefinition,
+        query: str,
+        candidates: List[ContextCandidate]
+    ) -> List[Dict[str, Any]]:
+        """
+        Invokes search_documents tool via self.tool_executor according to canonical architecture:
+        Agent Harness -> Tool Registry -> AuthorizationPolicy -> AuthorizedToolExecutor -> search_documents -> ContextCandidate.
+        Tracks executed queries to avoid redundant duplicate retrieval.
+        Returns citation/metadata events for streaming/visibility without full raw chunk text.
+        """
+        if not self.tool_executor:
+            return []
+        if not (getattr(agent.context_policy, "rag", False) or "search_documents" in (agent.tool_permissions.allowed or [])):
+            return []
+        executed = session.metadata.setdefault("executed_rag_queries", [])
+        norm_query = query.strip().lower()
+        if not norm_query or norm_query in executed:
+            return []
+        executed.append(norm_query)
+
+        tool_req = ToolRequest(
+            tool="search_documents",
+            arguments={"query": query},
+            call_id=str(uuid.uuid4())
+        )
+
+        allowed = agent.tool_permissions.allowed if agent.tool_permissions.allowed else ["search_documents"]
+        try:
+            tool_result = await self.tool_executor.execute(
+                tool_req,
+                context={
+                    "session_id": session.session_id,
+                    "agent_id": agent.agent_id,
+                    "user_id": session.user_id
+                },
+                allowed_tools=allowed
+            )
+        except Exception:
+            return []
+
+        events = []
+        if tool_result.context_candidates:
+            candidates.extend(tool_result.context_candidates)
+            for c in tool_result.context_candidates:
+                meta = c.metadata.copy()
+                meta["filename"] = c.source or meta.get("filename", "Document")
+                events.append({
+                    "type": "context_candidate",
+                    "candidate": {
+                        "id": c.id,
+                        "type": "rag",
+                        "source": c.source or "search_documents",
+                        "relevance_score": c.relevance_score,
+                        "metadata": meta
+                    }
+                })
+        return events
+
     async def _execute_tools(self, session: RuntimeSession, agent: AgentDefinition, decision: AgentDecision, candidates: List[ContextCandidate]):
         session.transition_to(ExecutionState.WAITING_FOR_TOOL)
         
@@ -45,6 +106,20 @@ class AgentHarness:
                 session.transition_to(ExecutionState.LIMIT_REACHED)
                 raise ToolCallLimitExceeded(agent.execution_limits.max_tool_calls)
             
+            # Check for duplicate identical RAG retrieval (Requirement 4)
+            if tool_req.tool == "search_documents":
+                q_text = str(tool_req.arguments.get("query", "")).strip().lower()
+                executed = session.metadata.setdefault("executed_rag_queries", [])
+                if q_text in executed:
+                    events.append({
+                        "type": "tool_completed",
+                        "tool": tool_req.tool,
+                        "result": "Query already executed in current session; skipped duplicate retrieval.",
+                        "status": "skipped"
+                    })
+                    continue
+                executed.append(q_text)
+
             session.tool_call_count += 1
             session.transition_to(ExecutionState.TOOL_EXECUTION)
             events.append({"type": "tool_execution_started", "tool": tool_req.tool, "arguments": tool_req.arguments})
@@ -162,6 +237,9 @@ class AgentHarness:
         if additional_candidates:
             candidates.extend(additional_candidates)
 
+        # Trigger automatic initial RAG retrieval if configured
+        await self._perform_rag_retrieval(session, agent, initial_input, candidates)
+
         step_idx = 0
         while True:
             self._check_limits(session, agent)
@@ -225,6 +303,11 @@ class AgentHarness:
         
         if additional_candidates:
             candidates.extend(additional_candidates)
+
+        # Trigger automatic initial RAG retrieval if configured
+        rag_events = await self._perform_rag_retrieval(session, agent, initial_input, candidates)
+        for rev in rag_events:
+            yield rev
 
         while True:
             self._check_limits(session, agent)

@@ -66,11 +66,12 @@ class SearchDocumentsTool(Tool):
             candidates.append(
                 ContextCandidate(
                     id=f"{r.document_id}_{r.chunk_id}",
-                    type="document",
+                    type="rag",
                     content=r.content,
                     source=r.filename,
                     relevance_score=r.score,
                     metadata={
+                        "filename": r.filename,
                         "page": r.page_number,
                         "section": r.section,
                         "document_id": r.document_id,
@@ -122,27 +123,20 @@ class GetDocumentTool(Tool):
         if not user_id:
             raise ValueError("Unauthorized: user_id missing in context")
             
-        # Simplified implementation: reuse search with top_k = large
-        query = RetrievalQuery(
-            query="",
-            top_k=100,
-            owner_id=user_id,
-            document_ids=[document_id],
-            min_score=0.0
-        )
-        
-        results = await self.rag_service.search_documents(query)
+        results = await self.rag_service.get_document_chunks(document_id, owner_id=user_id)
         
         candidates = []
         for r in results:
             candidates.append(
                 ContextCandidate(
                     id=f"{r.document_id}_{r.chunk_id}",
-                    type="document",
+                    type="rag",
                     content=r.content,
                     source=r.filename,
                     metadata={
+                        "filename": r.filename,
                         "page": r.page_number,
+                        "section": r.section,
                         "document_id": r.document_id,
                         "chunk_id": r.chunk_id
                     }

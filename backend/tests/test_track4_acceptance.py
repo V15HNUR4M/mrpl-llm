@@ -88,8 +88,9 @@ async def test_1_2_3_tool_result_and_harness_conversion(test_setup_harness):
         {"name": "mock_candidates", "arguments": {"zero": False}},
         "Done."
     ])
+    from app.core.config import settings
     gateway.register_provider("mock", mock_provider)
-    gateway.register_model_route("qwen2.5:latest", "mock")
+    gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "mock")
     
     harness = AgentHarness(registry, context_engine, gateway, tool_executor)
     session = RuntimeSession(session_id="1", conversation_id="1", agent_id="test_agent", agent_version="1.0", user_id="user1")

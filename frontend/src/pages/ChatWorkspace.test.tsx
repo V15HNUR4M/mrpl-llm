@@ -103,4 +103,43 @@ describe('ChatWorkspace UI', () => {
     
     expect(await screen.findByText('Preparing context...')).toBeInTheDocument();
   });
+
+  it('renders conversations list successfully without crashing on .map()', async () => {
+    const { chatApi } = await import('../api/chat');
+    vi.mocked(chatApi.getConversations).mockResolvedValueOnce([
+      { id: 'c-100', title: 'Refinery Yield Optimization', created_at: '', updated_at: '' },
+      { id: 'c-101', title: 'Catalyst Replacement Schedule', created_at: '', updated_at: '' }
+    ]);
+
+    render(<ChatWorkspace />);
+
+    expect(await screen.findByText('Refinery Yield Optimization')).toBeInTheDocument();
+    expect(await screen.findByText('Catalyst Replacement Schedule')).toBeInTheDocument();
+  });
+
+  it('renders user-visible error when SSE stream emits an error event', async () => {
+    (useSSE as any).mockImplementation(() => ({
+      isStreaming: false,
+      startStream: vi.fn(async (_agentId, _convId, _msg, onEvent) => {
+        onEvent({ type: 'error', error: 'Model execution failed: model not found' });
+      }),
+      stopStream: vi.fn(),
+    }));
+
+    const user = userEvent.setup();
+    render(<ChatWorkspace />);
+    
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: /new chat/i }));
+    });
+    
+    await screen.findByText(/General Agent/i);
+    
+    const input = screen.getByPlaceholderText(/ask mrpl ai workbench/i);
+    await act(async () => {
+      await user.type(input, 'Hello agent{enter}');
+    });
+    
+    expect(await screen.findByText(/⚠️ Error: Model execution failed: model not found/i)).toBeInTheDocument();
+  });
 });

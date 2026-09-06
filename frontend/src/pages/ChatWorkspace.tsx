@@ -93,6 +93,7 @@ export const ChatWorkspace: React.FC = () => {
     setStreamingText('');
     setAgentState('Initializing...');
     setStreamingSources([]);
+    const accumulatedSources: any[] = [];
 
     await startStream(
       selectedAgentId,
@@ -107,8 +108,9 @@ export const ChatWorkspace: React.FC = () => {
             setStreamingText(prev => prev + event.text);
             break;
           case 'context_candidate':
-            if (event.candidate && event.candidate.type === 'context' && event.candidate.source === 'search_documents') {
-              setStreamingSources(prev => [...prev, event.candidate]);
+            if (event.candidate && ['rag', 'context', 'document'].includes(event.candidate.type)) {
+              accumulatedSources.push(event.candidate);
+              setStreamingSources([...accumulatedSources]);
             }
             break;
           case 'completed':
@@ -119,15 +121,27 @@ export const ChatWorkspace: React.FC = () => {
               role: 'assistant',
               content: event.final_answer || streamingText, // fallback
               created_at: new Date().toISOString(),
-              metadata: { sources: streamingSources }
+              metadata: { sources: [...accumulatedSources] }
             }]);
             setStreamingText('');
             setAgentState('');
             setStreamingSources([]);
             break;
-          case 'error':
-            setAgentState(`Error: ${event.error}`);
+          case 'error': {
+            const errorText = event.error || 'Failed to generate response';
+            setMessages(prev => [...prev, {
+              id: Date.now().toString(),
+              conversation_id: activeConversationId,
+              role: 'assistant',
+              content: `⚠️ Error: ${errorText}`,
+              created_at: new Date().toISOString(),
+              metadata: { error: true }
+            }]);
+            setStreamingText('');
+            setAgentState(`Error: ${errorText}`);
+            setStreamingSources([]);
             break;
+          }
         }
       }
     );
@@ -208,11 +222,18 @@ export const ChatWorkspace: React.FC = () => {
                         <div className={styles.sources}>
                           <div className={styles.sourcesTitle}>Sources</div>
                           {msg.metadata.sources.map((s: any, idx: number) => {
-                            const parsedContent = typeof s.content === 'string' ? JSON.parse(s.content) : s.content;
+                            let parsed: any = null;
+                            if (typeof s.content === 'string') {
+                              try { parsed = JSON.parse(s.content); } catch (e) {}
+                            } else if (typeof s.content === 'object') {
+                              parsed = s.content;
+                            }
+                            const filename = s.metadata?.filename || (parsed && parsed.filename) || s.source || 'Document';
+                            const section = s.metadata?.section || (parsed && parsed.section);
                             return (
                               <div key={idx} className={styles.sourceChip}>
-                                <span className={styles.sourceDoc}>{parsedContent.filename || 'Document'}</span>
-                                {parsedContent.section && <span className={styles.sourceScore}>Section: {parsedContent.section}</span>}
+                                <span className={styles.sourceDoc}>{filename}</span>
+                                {section && <span className={styles.sourceScore}>Section: {section}</span>}
                               </div>
                             );
                           })}
@@ -241,13 +262,16 @@ export const ChatWorkspace: React.FC = () => {
                         <div className={styles.sources}>
                           <div className={styles.sourcesTitle}>Retrieved Sources</div>
                           {streamingSources.map((s, idx) => {
-                            let parsed = s.content;
+                            let parsed: any = null;
                             if (typeof s.content === 'string') {
                               try { parsed = JSON.parse(s.content); } catch (e) {}
+                            } else if (typeof s.content === 'object') {
+                              parsed = s.content;
                             }
+                            const filename = s.metadata?.filename || (parsed && parsed.filename) || s.source || 'Document';
                             return (
                               <div key={idx} className={styles.sourceChip}>
-                                <span className={styles.sourceDoc}>{parsed.filename || 'Document'}</span>
+                                <span className={styles.sourceDoc}>{filename}</span>
                               </div>
                             );
                           })}

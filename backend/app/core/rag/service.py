@@ -205,13 +205,19 @@ class RAGService:
         active_version_ids = []
         async with AsyncSessionLocal() as session:
             if query.document_ids:
-                stmt = select(DocumentVersion.id).where(
+                stmt = select(DocumentVersion.id).join(Document, Document.id == DocumentVersion.document_id).where(
                     DocumentVersion.document_id.in_(query.document_ids),
                     DocumentVersion.is_current == True
                 )
+                if query.owner_id:
+                    stmt = stmt.where(Document.owner_id == query.owner_id)
                 res = await session.execute(stmt)
                 active_version_ids = [row[0] for row in res.all()]
                 
+                # If document_ids were explicitly specified and none belong to owner, return empty
+                if not active_version_ids:
+                    return []
+
                 if len(query.document_ids) == 1 and active_version_ids:
                     filters["document_version_id"] = active_version_ids[0]
 
@@ -312,3 +318,24 @@ class RAGService:
                 }
                 for d in docs
             ]
+
+    async def get_document_chunks(self, document_id: str, owner_id: str) -> List[RetrievalResult]:
+        async with AsyncSessionLocal() as session:
+            stmt = select(Document).where(Document.id == document_id, Document.owner_id == owner_id)
+            res = await session.execute(stmt)
+            doc = res.scalars().first()
+            if not doc:
+                return []
+
+            v_stmt = select(DocumentVersion).where(
+                DocumentVersion.document_id == document_id,
+                DocumentVersion.is_current == True
+            )
+            v_res = await session.execute(v_stmt)
+            version = v_res.scalars().first()
+            if not version:
+                return []
+
+        if hasattr(self.vector_store, "get_by_document_version"):
+            return await self.vector_store.get_by_document_version(version.id, doc.filename)
+        return []

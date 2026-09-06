@@ -47,7 +47,7 @@ describe('Authentication Flow', () => {
     
     // Check validation
     await user.click(loginButton);
-    expect(screen.getByText(/email and password are required/i)).toBeInTheDocument();
+    expect(screen.getByText(/username and password are required/i)).toBeInTheDocument();
   });
 
   it('handles successful login', async () => {
@@ -55,13 +55,14 @@ describe('Authentication Flow', () => {
     const mockLogin = vi.spyOn(authApiModule.authApi, 'login').mockResolvedValue({
       access_token: 'fake-token',
       token_type: 'bearer',
-      user: { id: '1', email: 'test@test.com', is_active: true, role: 'user' }
+      user: { id: '1', username: 'admin', email: 'test@test.com', is_active: true, role: 'ADMIN' }
     });
     vi.spyOn(authApiModule.authApi, 'me').mockResolvedValue({
       id: '1',
+      username: 'admin',
       email: 'test@test.com',
       is_active: true,
-      role: 'user',
+      role: 'ADMIN',
     });
 
     render(
@@ -72,11 +73,11 @@ describe('Authentication Flow', () => {
       </MemoryRouter>
     );
 
-    await user.type(screen.getByLabelText(/email/i), 'test@test.com');
+    await user.type(screen.getByLabelText(/username/i), 'admin');
     await user.type(screen.getByLabelText(/password/i), 'password');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
-    expect(mockLogin).toHaveBeenCalledWith('test@test.com', 'password');
+    expect(mockLogin).toHaveBeenCalledWith('admin', 'password');
   });
 
   it('handles failed login', async () => {
@@ -91,7 +92,7 @@ describe('Authentication Flow', () => {
       </MemoryRouter>
     );
 
-    await user.type(screen.getByLabelText(/email/i), 'wrong@test.com');
+    await user.type(screen.getByLabelText(/username/i), 'wronguser');
     await user.type(screen.getByLabelText(/password/i), 'wrong');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 

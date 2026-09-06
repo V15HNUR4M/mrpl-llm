@@ -96,8 +96,8 @@ class WorkflowEngine:
             pass
 
     async def _audit(self, user_id: str, action: str, resource_id: str, result: str, metadata: dict = None):
-        async with self.uow as uow:
-            try:
+        try:
+            async with self.uow as uow:
                 await uow.audit.create({
                     "user_id": user_id,
                     "action": action,
@@ -106,9 +106,8 @@ class WorkflowEngine:
                     "result": result,
                     "metadata_": metadata or {}
                 })
-                await uow.commit()
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     async def execute(self, run_id: str, workflow_version_id: str, user_id: str, spec: WorkflowSpec, inputs: Dict[str, Any]):
         context = WorkflowContext(inputs=inputs)

@@ -1,10 +1,16 @@
-import { fetchClient } from './client';
+import { fetchClient, setAuthToken, removeAuthToken } from './client';
 
 export interface User {
   id: string;
-  email: string;
+  username?: string;
+  email?: string | null;
   is_active: boolean;
   role: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
 }
 
 export interface AuthResponse {
@@ -14,11 +20,32 @@ export interface AuthResponse {
 }
 
 export const authApi = {
-  login: (email: string, password: string): Promise<AuthResponse> => 
-    fetchClient<AuthResponse>('/auth/login', {
+  login: async (username: string, password: string): Promise<AuthResponse> => {
+    const params = new URLSearchParams();
+    params.append('username', username);
+    params.append('password', password);
+
+    const tokenResponse = await fetchClient<TokenResponse>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password })
-    }),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
+    });
+
+    setAuthToken(tokenResponse.access_token);
+    try {
+      const user = await authApi.me(tokenResponse.access_token);
+      return {
+        access_token: tokenResponse.access_token,
+        token_type: tokenResponse.token_type,
+        user,
+      };
+    } catch (err) {
+      removeAuthToken();
+      throw err;
+    }
+  },
     
   register: (email: string, password: string): Promise<AuthResponse> =>
     fetchClient<AuthResponse>('/auth/register', {
@@ -26,5 +53,8 @@ export const authApi = {
       body: JSON.stringify({ email, password })
     }),
     
-  me: (): Promise<User> => fetchClient<User>('/auth/me')
+  me: (token?: string): Promise<User> =>
+    fetchClient<User>('/auth/me', token ? {
+      headers: { Authorization: `Bearer ${token}` }
+    } : {})
 };

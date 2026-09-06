@@ -85,7 +85,7 @@ class RuntimeSession(BaseModel):
                 ExecutionState.CANCELLING, ExecutionState.TIMED_OUT
             ],
             ExecutionState.WAITING_FOR_TOOL: [
-                ExecutionState.TOOL_EXECUTION, ExecutionState.CANCELLING, ExecutionState.TIMED_OUT,
+                ExecutionState.TOOL_EXECUTION, ExecutionState.RUNNING, ExecutionState.CANCELLING, ExecutionState.TIMED_OUT,
                 ExecutionState.FAILED
             ],
             ExecutionState.TOOL_EXECUTION: [

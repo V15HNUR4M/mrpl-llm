@@ -67,7 +67,7 @@ class ContextAssemblyPipeline:
                 package.conversation_summary = c
             elif c.type == "memory":
                 package.semantic_memories.append(c)
-            elif c.type == "rag":
+            elif c.type in ("rag", "document", "context"):
                 package.rag_context.append(c)
             elif c.type == "tool":
                 package.tool_context.append(c)

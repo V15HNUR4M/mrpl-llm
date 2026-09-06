@@ -21,6 +21,31 @@ from app.core.runtime.errors import AgentExecutionError
 
 router = APIRouter()
 
+class AgentResponse(BaseModel):
+    agent_id: str
+    name: str
+    description: str
+    version: str
+    status: str
+
+@router.get("", response_model=List[AgentResponse])
+async def list_agents(
+    request: Request,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    registry = request.app.state.agent_registry
+    agents = registry.list_all()
+    return [
+        AgentResponse(
+            agent_id=agent.agent_id,
+            name=agent.name,
+            description=agent.description,
+            version=agent.version,
+            status=agent.status
+        )
+        for agent in agents
+    ]
+
 class AgentRunRequest(BaseModel):
     message: str
     conversation_id: str
@@ -128,7 +153,7 @@ async def stream_agent(
     agent_id: str,
     run_req: AgentRunRequest,
     current_user: UserResponse = Depends(get_current_user),
-    uow: UnitOfWork = Depends(get_uow)
+    uow: UnitOfWork = Depends(get_uow, use_cache=False)
 ):
     registry = request.app.state.agent_registry
     harness = request.app.state.agent_harness
@@ -202,7 +227,6 @@ async def stream_agent(
                             "content": final_answer,
                             "agent_id": agent.agent_id
                         })
-                        await new_uow.commit()
                         
             except Exception as e:
                 error_event = {"type": "error", "error": str(e)}

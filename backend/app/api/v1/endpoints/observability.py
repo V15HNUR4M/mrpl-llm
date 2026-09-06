@@ -28,8 +28,8 @@ async def get_metrics(
     service: IObservabilityService = Depends(get_service)
 ):
     """Retrieve operational metrics scoped to user/system."""
-    is_admin = (current_user.role == "ADMIN")
-    target_user_id = None if is_admin else current_user.id
+    is_admin = bool(str(current_user.role) == "ADMIN")
+    target_user_id = None if is_admin else str(current_user.id)
     return await service.get_metrics(user_id=target_user_id, is_admin=is_admin)
 
 @router.get("/events", response_model=List[TelemetryEventResponse])
@@ -45,8 +45,8 @@ async def list_telemetry_events(
     service: IObservabilityService = Depends(get_service)
 ):
     """List structured telemetry events with enforced user isolation."""
-    is_admin = (current_user.role == "ADMIN")
-    target_user_id = user_id if is_admin else current_user.id
+    is_admin = bool(str(current_user.role) == "ADMIN")
+    target_user_id = user_id if is_admin else str(current_user.id)
     events = await service.get_events(
         user_id=target_user_id,
         is_admin=is_admin,
@@ -66,8 +66,8 @@ async def get_telemetry_event(
     service: IObservabilityService = Depends(get_service)
 ):
     """Retrieve a single event respecting user isolation."""
-    is_admin = (current_user.role == "ADMIN")
-    target_user_id = None if is_admin else current_user.id
+    is_admin = bool(str(current_user.role) == "ADMIN")
+    target_user_id = None if is_admin else str(current_user.id)
     event = await service.get_event_by_id(
         event_id=event_id,
         user_id=target_user_id,
@@ -88,7 +88,7 @@ async def trigger_retention_cleanup(
     service: IObservabilityService = Depends(get_service)
 ):
     """Administrative cleanup of historical telemetry based on retention limits."""
-    if current_user.role != "ADMIN":
+    if str(current_user.role) != "ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrative privileges required"

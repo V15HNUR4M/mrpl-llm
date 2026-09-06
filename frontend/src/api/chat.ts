@@ -1,5 +1,16 @@
 import { fetchClient } from './client';
 
+export interface PaginationInfo {
+  limit: number;
+  offset: number;
+  total: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  pagination: PaginationInfo;
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -17,7 +28,13 @@ export interface Message {
 }
 
 export const chatApi = {
-  getConversations: (): Promise<Conversation[]> => fetchClient<Conversation[]>('/conversations'),
+  getConversations: async (limit: number = 20, offset: number = 0): Promise<Conversation[]> => {
+    const res = await fetchClient<PaginatedResponse<Conversation>>(`/conversations?limit=${limit}&offset=${offset}`);
+    if (!res || !Array.isArray(res.items)) {
+      throw new Error('Malformed API response: expected paginated items array for conversations');
+    }
+    return res.items;
+  },
   
   createConversation: (title: string): Promise<Conversation> => 
     fetchClient<Conversation>('/conversations', {
@@ -27,8 +44,13 @@ export const chatApi = {
     
   getConversation: (id: string): Promise<Conversation> => fetchClient<Conversation>(`/conversations/${id}`),
   
-  getMessages: (conversationId: string): Promise<Message[]> => 
-    fetchClient<Message[]>(`/conversations/${conversationId}/messages`),
+  getMessages: async (conversationId: string, limit: number = 50, offset: number = 0): Promise<Message[]> => {
+    const res = await fetchClient<PaginatedResponse<Message>>(`/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`);
+    if (!res || !Array.isArray(res.items)) {
+      throw new Error('Malformed API response: expected paginated items array for messages');
+    }
+    return res.items;
+  },
     
   addMessage: (conversationId: string, role: string, content: string): Promise<Message> =>
     fetchClient<Message>(`/conversations/${conversationId}/messages`, {

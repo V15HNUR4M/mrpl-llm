@@ -1,0 +1,20 @@
+PUMP P204 MAINTENANCE REPORT
+Asset: Pump P204
+Maintenance Date: 2026-08-20
+
+WORK PERFORMED
+The drive-end bearing lubrication was checked and lubricant was replenished. Coupling alignment was inspected and adjusted. The mechanical seal area was cleaned and inspected.
+
+BEARING
+After lubrication, the abnormal bearing noise was reduced. The bearing was retained in service because no severe physical damage was identified.
+
+COUPLING
+A minor alignment deviation was identified and corrected during maintenance.
+
+MECHANICAL SEAL
+Minor seal leakage was still present after inspection. The seal was not replaced. Replacement is recommended if leakage increases.
+
+FOLLOW-UP
+Continue monitoring drive-end vibration, bearing temperature, and seal leakage. A follow-up inspection should be scheduled if vibration remains above the normal baseline.
+
+Maintenance conclusion: Immediate lubrication and coupling-alignment concerns were addressed. The mechanical seal remains a monitoring item.

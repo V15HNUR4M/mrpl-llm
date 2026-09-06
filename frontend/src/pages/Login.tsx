@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import styles from './Login.module.css';
 
 export const Login: React.FC = () => {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -14,8 +14,8 @@ export const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError('Email and password are required');
+    if (!username || !password) {
+      setError('Username and password are required');
       return;
     }
 
@@ -23,7 +23,7 @@ export const Login: React.FC = () => {
     setError('');
 
     try {
-      const response = await authApi.login(email, password);
+      const response = await authApi.login(username, password);
       login(response.access_token, response.user);
       navigate('/');
     } catch (err: any) {
@@ -45,13 +45,13 @@ export const Login: React.FC = () => {
         
         <form onSubmit={handleSubmit}>
           <div className={styles.formGroup}>
-            <label className="label" htmlFor="email">Email address</label>
+            <label className="label" htmlFor="username">Username</label>
             <input
-              id="email"
-              type="email"
+              id="username"
+              type="text"
               className="input-field"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
               autoComplete="username"
             />

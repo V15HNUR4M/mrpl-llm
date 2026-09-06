@@ -25,6 +25,10 @@ class VectorStore(ABC):
     async def similarity_search(self, query_embedding: List[float], top_k: int, filters: Dict[str, Any]) -> List[RetrievalResult]:
         pass
 
+    @abstractmethod
+    async def get_by_document_version(self, document_version_id: str, filename: str) -> List[RetrievalResult]:
+        pass
+
 class ChromaVectorStore(VectorStore):
     def __init__(self, collection_name: str = "mrpl_knowledge"):
         os.makedirs(settings.VECTOR_DB_PATH, exist_ok=True)
@@ -136,3 +140,30 @@ class ChromaVectorStore(VectorStore):
             return retrieval_results
         except Exception as e:
             raise VectorStoreError(f"Similarity search failed: {str(e)}")
+
+    async def get_by_document_version(self, document_version_id: str, filename: str) -> List[RetrievalResult]:
+        try:
+            res = self.collection.get(
+                where={"document_version_id": document_version_id},
+                include=["documents", "metadatas"]
+            )
+            results = []
+            if not res or not res["ids"]:
+                return results
+            for i in range(len(res["ids"])):
+                chunk_id = res["ids"][i]
+                content = res["documents"][i]
+                meta = res["metadatas"][i]
+                results.append(RetrievalResult(
+                    chunk_id=chunk_id,
+                    document_id=meta.get("document_id", ""),
+                    document_version_id=document_version_id,
+                    content=content,
+                    score=1.0,
+                    page_number=meta.get("page_number"),
+                    section=meta.get("section"),
+                    filename=meta.get("filename", filename)
+                ))
+            return results
+        except Exception as e:
+            raise VectorStoreError(f"Failed to get chunks by version: {str(e)}")

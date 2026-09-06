@@ -12,7 +12,7 @@ logger = logging.getLogger("mrpl.dependencies")
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    uow: UnitOfWork = Depends(get_uow)
+    uow: UnitOfWork = Depends(get_uow, use_cache=False)
 ) -> User:
     credentials_exception = MRPLAPIException(
         code="AUTH_INVALID_CREDENTIALS",
