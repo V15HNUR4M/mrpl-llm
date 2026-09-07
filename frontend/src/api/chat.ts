@@ -51,6 +51,11 @@ export const chatApi = {
     
   getConversation: (id: string): Promise<Conversation> => fetchClient<Conversation>(`/conversations/${id}`),
   
+  deleteConversation: (id: string): Promise<void> =>
+    fetchClient<void>(`/conversations/${id}`, {
+      method: 'DELETE',
+    }),
+  
   getMessages: async (conversationId: string, limit: number = 50, offset: number = 0): Promise<Message[]> => {
     const res = await fetchClient<PaginatedResponse<Message>>(`/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`);
     if (!res || !Array.isArray(res.items)) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, PlusCircle, MessageSquare, Square, Download } from 'lucide-react';
+import { Send, User, Bot, PlusCircle, MessageSquare, Square, Download, Trash2 } from 'lucide-react';
 import { chatApi } from '../api/chat';
 import type { Conversation, Message } from '../api/chat';
 import { agentsApi } from '../api/agents';
@@ -28,6 +28,9 @@ export const ChatWorkspace: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [inputValue, setInputValue] = useState('');
+  const [convToDelete, setConvToDelete] = useState<Conversation | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Use application-level GenerationContext (survives page navigation)
   const {
@@ -129,6 +132,32 @@ export const ChatWorkspace: React.FC = () => {
     }
   };
 
+  const handleDeleteConversation = async () => {
+    if (!convToDelete) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await chatApi.deleteConversation(convToDelete.id);
+      const remaining = conversations.filter(c => c.id !== convToDelete.id);
+      setConversations(remaining);
+
+      if (activeConversationId === convToDelete.id) {
+        if (remaining.length > 0) {
+          setActiveConversationId(remaining[0].id);
+        } else {
+          setActiveConversationId(null);
+          setMessages([]);
+        }
+      }
+      setConvToDelete(null);
+    } catch (err: any) {
+      console.error('Failed to delete conversation:', err);
+      setDeleteError(err.message || 'Failed to delete conversation. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleDownload = async (fileId: string, filename: string) => {
     try {
       await chatApi.downloadGeneratedFile(fileId, filename);
@@ -221,6 +250,19 @@ export const ChatWorkspace: React.FC = () => {
             >
               <MessageSquare size={16} />
               <span className={styles.conversationTitle}>{conv.title}</span>
+              <button
+                type="button"
+                className={styles.deleteConvBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteError(null);
+                  setConvToDelete(conv);
+                }}
+                aria-label="Delete conversation"
+                title="Delete conversation"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
           ))}
         </div>
@@ -419,6 +461,50 @@ export const ChatWorkspace: React.FC = () => {
           </div>
         )}
       </div>
+
+      {convToDelete && (
+        <div className={styles.modalOverlay} onClick={() => !isDeleting && setConvToDelete(null)}>
+          <div 
+            className={styles.modal} 
+            onClick={e => e.stopPropagation()} 
+            role="dialog" 
+            aria-modal="true" 
+            aria-labelledby="delete-dialog-title"
+          >
+            <div className={styles.modalHeader}>
+              <h3 id="delete-dialog-title" className={styles.modalTitle}>Delete this conversation?</h3>
+            </div>
+            <div className={styles.modalBody}>
+              <p className={styles.modalText}>
+                Are you sure you want to delete <strong>"{convToDelete.title}"</strong>? This will permanently remove all messages in this conversation.
+              </p>
+              {deleteError && (
+                <div className={styles.deleteErrorMessage} role="alert">
+                  {deleteError}
+                </div>
+              )}
+            </div>
+            <div className={styles.modalActions}>
+              <button 
+                type="button"
+                className="btn btn-outline"
+                onClick={() => { setConvToDelete(null); setDeleteError(null); }}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                className="btn btn-danger"
+                onClick={handleDeleteConversation}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -66,3 +66,16 @@ async def update_conversation(
         updated = await uow.conversations.update(conv, update_data)
         await uow.commit()
         return updated
+
+@router.delete("/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow)
+):
+    async with uow:
+        service = ConversationService(uow)
+        await service.delete_conversation(conversation_id, current_user.id)
+        await uow.commit()
+    return None
+

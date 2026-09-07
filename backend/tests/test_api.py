@@ -192,3 +192,90 @@ async def test_list_agents_contract(async_client: AsyncClient):
         # Ensure internals are not exposed
         assert "instructions" not in agent
 
+@pytest.mark.asyncio
+async def test_delete_conversation_success_and_cascade(async_client: AsyncClient):
+    # 1. Register & login
+    await async_client.post("/api/v1/auth/register", json={"username": "deluser", "password": "password123"})
+    login_resp = await async_client.post("/api/v1/auth/login", data={"username": "deluser", "password": "password123"})
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Create conversation
+    conv_resp = await async_client.post(
+        "/api/v1/conversations",
+        json={"title": "To Be Deleted"},
+        headers=headers
+    )
+    assert conv_resp.status_code == 201
+    conv_id = conv_resp.json()["id"]
+
+    # 3. Add message to conversation
+    msg_resp = await async_client.post(
+        f"/api/v1/conversations/{conv_id}/messages",
+        json={"role": "user", "content": "Message inside conversation to delete"},
+        headers=headers
+    )
+    assert msg_resp.status_code == 201
+
+    # Verify conversation and message exist
+    get_conv_resp = await async_client.get(f"/api/v1/conversations/{conv_id}", headers=headers)
+    assert get_conv_resp.status_code == 200
+    get_msgs_resp = await async_client.get(f"/api/v1/conversations/{conv_id}/messages", headers=headers)
+    assert get_msgs_resp.status_code == 200
+    assert len(get_msgs_resp.json()["items"]) == 1
+
+    # 4. Delete conversation
+    del_resp = await async_client.delete(f"/api/v1/conversations/{conv_id}", headers=headers)
+    assert del_resp.status_code == 204
+
+    # 5. Verify conversation is no longer accessible (404)
+    get_deleted_resp = await async_client.get(f"/api/v1/conversations/{conv_id}", headers=headers)
+    assert get_deleted_resp.status_code == 404
+
+    # 6. Verify messages endpoint returns 404 for deleted conversation
+    get_deleted_msgs = await async_client.get(f"/api/v1/conversations/{conv_id}/messages", headers=headers)
+    assert get_deleted_msgs.status_code == 404
+
+    # 7. Verify deleted conversation does not appear in user's conversation list
+    list_resp = await async_client.get("/api/v1/conversations", headers=headers)
+    assert list_resp.status_code == 200
+    conv_ids = [c["id"] for c in list_resp.json()["items"]]
+    assert conv_id not in conv_ids
+
+@pytest.mark.asyncio
+async def test_delete_conversation_security_and_nonexistent(async_client: AsyncClient):
+    # 1. Unauthenticated delete returns 401
+    unauth_resp = await async_client.delete("/api/v1/conversations/nonexistent-id")
+    assert unauth_resp.status_code == 401
+
+    # Register User 1 and User 2
+    await async_client.post("/api/v1/auth/register", json={"username": "owner1", "password": "password123"})
+    tok1 = (await async_client.post("/api/v1/auth/login", data={"username": "owner1", "password": "password123"})).json()["access_token"]
+    headers1 = {"Authorization": f"Bearer {tok1}"}
+
+    await async_client.post("/api/v1/auth/register", json={"username": "attacker2", "password": "password123"})
+    tok2 = (await async_client.post("/api/v1/auth/login", data={"username": "attacker2", "password": "password123"})).json()["access_token"]
+    headers2 = {"Authorization": f"Bearer {tok2}"}
+
+    # User 1 creates conversation
+    conv_resp = await async_client.post(
+        "/api/v1/conversations",
+        json={"title": "Owner1's private chat"},
+        headers=headers1
+    )
+    assert conv_resp.status_code == 201
+    conv_id = conv_resp.json()["id"]
+
+    # 2. User 2 attempts to delete User 1's conversation -> 404 (isolation)
+    del_other_resp = await async_client.delete(f"/api/v1/conversations/{conv_id}", headers=headers2)
+    assert del_other_resp.status_code == 404
+
+    # Verify conversation still exists for User 1
+    check_resp = await async_client.get(f"/api/v1/conversations/{conv_id}", headers=headers1)
+    assert check_resp.status_code == 200
+
+    # 3. Nonexistent conversation delete returns 404
+    del_missing_resp = await async_client.delete("/api/v1/conversations/nonexistent-uuid-12345", headers=headers1)
+    assert del_missing_resp.status_code == 404
+
+

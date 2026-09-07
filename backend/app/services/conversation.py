@@ -62,3 +62,11 @@ class ConversationService:
         # Verify ownership
         await self.get_conversation(conversation_id, user_id)
         return await self.uow.messages.list_recent_by_conversation(conversation_id, limit)
+
+    async def delete_conversation(self, conversation_id: str, user_id: str) -> bool:
+        # Verify ownership (raises 404 if nonexistent or belongs to another user)
+        conversation = await self.get_conversation(conversation_id, user_id)
+        # Deleting the loaded ORM instance triggers cascading deletion of related messages and summaries
+        await self.uow.session.delete(conversation)
+        await self.uow.session.flush()
+        return True
