@@ -53,7 +53,8 @@ class RAGService:
         file_bytes: bytes, 
         filename: str, 
         mime_type: str, 
-        owner_id: Optional[str] = None
+        owner_id: Optional[str] = None,
+        access_scope: str = "PRIVATE"
     ) -> IngestionResult:
         self._validate_file(file_bytes, filename)
         
@@ -84,7 +85,7 @@ class RAGService:
             
             # 2. Extract and Parse
             parser = self.parser_registry.get_parser(mime_type, file_type)
-            metadata = {"filename": filename}
+            metadata = {"filename": filename, "access_scope": access_scope}
             if owner_id:
                 metadata["owner_id"] = owner_id
             parsed_doc = parser.parse(file_bytes, metadata=metadata)
@@ -98,6 +99,7 @@ class RAGService:
                     mime_type=mime_type,
                     file_size=len(file_bytes),
                     checksum=checksum,
+                    access_scope=access_scope,
                     status="PROCESSING"
                 )
                 session.add(doc)
@@ -304,7 +306,10 @@ class RAGService:
 
     async def list_documents(self, owner_id: str) -> List[dict]:
         async with AsyncSessionLocal() as session:
-            stmt = select(Document).where(Document.owner_id == owner_id).order_by(Document.created_at.desc())
+            stmt = select(Document).where(
+                Document.owner_id == owner_id,
+                Document.access_scope != "EVALUATION"
+            ).order_by(Document.created_at.desc())
             result = await session.execute(stmt)
             docs = result.scalars().all()
             

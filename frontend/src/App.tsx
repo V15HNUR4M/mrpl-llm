@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { GenerationProvider } from './context/GenerationContext';
 import { AppShell } from './layouts/AppShell';
 import { Login } from './pages/Login';
 import { ChatWorkspace } from './pages/ChatWorkspace';
@@ -30,26 +31,28 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          
-          <Route path="/" element={
-            <ProtectedRoute>
-              <AppShell />
-            </ProtectedRoute>
-          }>
-            <Route index element={<ChatWorkspace />} />
-            <Route path="documents" element={<Documents />} />
-            <Route path="observability" element={<Observability />} />
-            <Route path="evaluation" element={<Evaluation />} />
-            <Route path="agents" element={
-              <div style={{ padding: 48, textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                <h2>Agents Management</h2>
-                <p>Status indicators and configuration coming in a later track.</p>
-              </div>
-            } />
-          </Route>
-        </Routes>
+        <GenerationProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            
+            <Route path="/" element={
+              <ProtectedRoute>
+                <AppShell />
+              </ProtectedRoute>
+            }>
+              <Route index element={<ChatWorkspace />} />
+              <Route path="documents" element={<Documents />} />
+              <Route path="observability" element={<Observability />} />
+              <Route path="evaluation" element={<Evaluation />} />
+              <Route path="agents" element={
+                <div style={{ padding: 48, textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                  <h2>Agents Management</h2>
+                  <p>Status indicators and configuration coming in a later track.</p>
+                </div>
+              } />
+            </Route>
+          </Routes>
+        </GenerationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

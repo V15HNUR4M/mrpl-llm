@@ -21,5 +21,19 @@ export const agentsApi = {
       },
       body: JSON.stringify({ conversation_id: conversationId, message })
     });
+  },
+
+  getActiveGeneration: (conversationId?: string): Promise<{ active: boolean; generation: any; events?: any[] }> => {
+    let url = '/agents/generations/active';
+    if (conversationId) {
+      url += `?conversation_id=${encodeURIComponent(conversationId)}`;
+    }
+    return fetchClient<{ active: boolean; generation: any; events?: any[] }>(url);
+  },
+
+  stopGeneration: (generationId: string): Promise<{ status: string; message: string }> => {
+    return fetchClient<{ status: string; message: string }>(`/agents/generations/${generationId}/stop`, {
+      method: 'POST'
+    });
   }
 };

@@ -1,25 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, PlusCircle, MessageSquare } from 'lucide-react';
+import { Send, User, Bot, PlusCircle, MessageSquare, Square } from 'lucide-react';
 import { chatApi } from '../api/chat';
 import type { Conversation, Message } from '../api/chat';
 import { agentsApi } from '../api/agents';
 import type { Agent } from '../api/agents';
-import { useSSE } from '../hooks/useSSE';
+import { useGeneration } from '../context/GenerationContext';
+import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import styles from './ChatWorkspace.module.css';
 
 export const ChatWorkspace: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [inputValue, setInputValue] = useState('');
-  
-  // Streaming state
-  const { isStreaming, startStream } = useSSE();
-  const [streamingText, setStreamingText] = useState('');
-  const [agentState, setAgentState] = useState('');
-  const [streamingSources, setStreamingSources] = useState<any[]>([]);
+
+  // Use application-level GenerationContext (survives page navigation)
+  const {
+    activeConversationId,
+    setActiveConversationId,
+    isStreaming,
+    streamingConversationId,
+    streamingText,
+    agentState,
+    streamingSources,
+    startGeneration,
+    stopGeneration,
+    generationCompletedAt
+  } = useGeneration();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -28,6 +36,9 @@ export const ChatWorkspace: React.FC = () => {
     try {
       const data = await chatApi.getConversations();
       setConversations(data);
+      if (data.length > 0 && !activeConversationId) {
+        setActiveConversationId(data[0].id);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -50,13 +61,23 @@ export const ChatWorkspace: React.FC = () => {
     fetchAgents();
   }, []);
 
+  const loadMessages = async (convId: string) => {
+    try {
+      const data = await chatApi.getMessages(convId);
+      setMessages(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Load messages when conversation changes or generation completes
   useEffect(() => {
     if (activeConversationId) {
-      chatApi.getMessages(activeConversationId).then(setMessages).catch(console.error);
+      loadMessages(activeConversationId);
     } else {
       setMessages([]);
     }
-  }, [activeConversationId]);
+  }, [activeConversationId, generationCompletedAt]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -79,7 +100,7 @@ export const ChatWorkspace: React.FC = () => {
     const userText = inputValue.trim();
     setInputValue('');
     
-    // Add optimistic user message
+    // Optimistic user message in UI
     const userMsg: Message = {
       id: Date.now().toString(),
       conversation_id: activeConversationId,
@@ -88,61 +109,22 @@ export const ChatWorkspace: React.FC = () => {
       created_at: new Date().toISOString()
     };
     setMessages(prev => [...prev, userMsg]);
-    
-    // Reset streaming state
-    setStreamingText('');
-    setAgentState('Initializing...');
-    setStreamingSources([]);
-    const accumulatedSources: any[] = [];
 
-    await startStream(
+    // Start generation managed at application level
+    await startGeneration(
       selectedAgentId,
       activeConversationId,
       userText,
-      (event) => {
-        switch (event.type) {
-          case 'state_changed':
-            setAgentState(formatAgentState(event.state));
-            break;
-          case 'text_delta':
-            setStreamingText(prev => prev + event.text);
-            break;
-          case 'context_candidate':
-            if (event.candidate && ['rag', 'context', 'document'].includes(event.candidate.type)) {
-              accumulatedSources.push(event.candidate);
-              setStreamingSources([...accumulatedSources]);
-            }
-            break;
-          case 'completed':
-            // Add the final assistant message to the list
-            setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              conversation_id: activeConversationId,
-              role: 'assistant',
-              content: event.final_answer || streamingText, // fallback
-              created_at: new Date().toISOString(),
-              metadata: { sources: [...accumulatedSources] }
-            }]);
-            setStreamingText('');
-            setAgentState('');
-            setStreamingSources([]);
-            break;
-          case 'error': {
-            const errorText = event.error || 'Failed to generate response';
-            setMessages(prev => [...prev, {
-              id: Date.now().toString(),
-              conversation_id: activeConversationId,
-              role: 'assistant',
-              content: `⚠️ Error: ${errorText}`,
-              created_at: new Date().toISOString(),
-              metadata: { error: true }
-            }]);
-            setStreamingText('');
-            setAgentState(`Error: ${errorText}`);
-            setStreamingSources([]);
-            break;
-          }
-        }
+      (finalAnswer, sources) => {
+        // Optimistic assistant message upon completion before DB sync
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          conversation_id: activeConversationId,
+          role: 'assistant',
+          content: finalAnswer,
+          created_at: new Date().toISOString(),
+          metadata: { sources }
+        }]);
       }
     );
   };
@@ -154,21 +136,13 @@ export const ChatWorkspace: React.FC = () => {
     }
   };
 
-  const formatAgentState = (state: string) => {
-    const map: Record<string, string> = {
-      'CONTEXT_BUILDING': 'Preparing context...',
-      'GENERATING': 'Generating response...',
-      'TOOL_EXECUTION': 'Executing tool...',
-      'WAITING_FOR_TOOL': 'Processing tools...'
-    };
-    return map[state] || state;
-  };
-
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
   };
+
+  const isCurrentConvStreaming = isStreaming && streamingConversationId === activeConversationId;
 
   return (
     <div className={styles.workspace}>
@@ -217,7 +191,11 @@ export const ChatWorkspace: React.FC = () => {
                       {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
                     </div>
                     <div className={styles.messageContent}>
-                      {msg.content}
+                      {msg.role === 'assistant' ? (
+                        <MarkdownRenderer content={msg.content} />
+                      ) : (
+                        msg.content
+                      )}
                       {msg.metadata?.sources && msg.metadata.sources.length > 0 && (
                         <div className={styles.sources}>
                           <div className={styles.sourcesTitle}>Sources</div>
@@ -244,14 +222,16 @@ export const ChatWorkspace: React.FC = () => {
                 </div>
               ))}
               
-              {isStreaming && (
+              {isCurrentConvStreaming && (
                 <div className={`${styles.messageWrapper}`}>
                   <div className={styles.message}>
                     <div className={`${styles.avatar} ${styles.avatarAssistant}`}>
                       <Bot size={18} />
                     </div>
                     <div className={styles.messageContent}>
-                      {streamingText}
+                      {streamingText ? (
+                        <MarkdownRenderer content={streamingText} />
+                      ) : null}
                       {(!streamingText || agentState) && (
                         <div className={styles.agentState}>
                           <div className="spinner dark" style={{ width: 12, height: 12, borderWidth: 1 }}></div>
@@ -290,20 +270,32 @@ export const ChatWorkspace: React.FC = () => {
                 <textarea
                   ref={inputRef}
                   className={styles.composerInput}
-                  placeholder="Ask MRPL AI Workbench..."
+                  placeholder={isStreaming ? "Generating response..." : "Ask MRPL AI Workbench..."}
                   value={inputValue}
                   onChange={handleInput}
                   onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
                 />
-                <button 
-                  className={styles.sendBtn} 
-                  onClick={handleSend}
-                  disabled={!inputValue.trim() || isStreaming}
-                >
-                  <Send size={16} />
-                </button>
+                {isStreaming ? (
+                  <button 
+                    className={styles.stopBtn}
+                    onClick={stopGeneration}
+                    title="Stop Generation"
+                    aria-label="Stop Generation"
+                  >
+                    <Square size={14} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button 
+                    className={styles.sendBtn} 
+                    onClick={handleSend}
+                    disabled={!inputValue.trim()}
+                    aria-label="Send message"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
               </div>
             </div>
           </>

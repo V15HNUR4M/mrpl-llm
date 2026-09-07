@@ -3,20 +3,29 @@ import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatWorkspace } from './ChatWorkspace';
 
-// Mock the SSE hook
-vi.mock('../hooks/useSSE', () => ({
-  useSSE: vi.fn(() => ({
-    isStreaming: false,
-    startStream: vi.fn(),
-    stopStream: vi.fn(),
-  })),
+let mockState = {
+  activeConversationId: 'c1',
+  setActiveConversationId: vi.fn(),
+  isStreaming: false,
+  streamingConversationId: null as string | null,
+  streamingText: '',
+  agentState: '',
+  streamingSources: [] as any[],
+  startGeneration: vi.fn(),
+  stopGeneration: vi.fn(),
+  generationCompletedAt: 0,
+};
+
+vi.mock('../context/GenerationContext', () => ({
+  useGeneration: vi.fn(() => mockState),
+  GenerationProvider: ({ children }: any) => children,
 }));
 
-import { useSSE } from '../hooks/useSSE';
+import { useGeneration } from '../context/GenerationContext';
 
 vi.mock('../api/chat', () => ({
   chatApi: {
-    getConversations: vi.fn().mockResolvedValue([]),
+    getConversations: vi.fn().mockResolvedValue([{ id: 'c1', title: 'New Chat' }]),
     createConversation: vi.fn().mockResolvedValue({ id: 'c1', title: 'New Chat' }),
     getMessages: vi.fn().mockResolvedValue([]),
   },
@@ -31,6 +40,19 @@ vi.mock('../api/agents', () => ({
 describe('ChatWorkspace UI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockState = {
+      activeConversationId: 'c1',
+      setActiveConversationId: vi.fn(),
+      isStreaming: false,
+      streamingConversationId: null,
+      streamingText: '',
+      agentState: '',
+      streamingSources: [],
+      startGeneration: vi.fn(),
+      stopGeneration: vi.fn(),
+      generationCompletedAt: 0,
+    };
+    (useGeneration as any).mockImplementation(() => mockState);
   });
 
   it('renders chat interface and agent selection', async () => {
@@ -45,22 +67,13 @@ describe('ChatWorkspace UI', () => {
     expect(screen.getByPlaceholderText(/ask mrpl ai workbench/i)).toBeInTheDocument();
   });
 
-  it('can send a message and start stream', async () => {
-    const mockStartStream = vi.fn();
-    (useSSE as any).mockReturnValue({
-      isStreaming: false,
-      startStream: mockStartStream,
-      stopStream: vi.fn(),
-    });
+  it('can send a message and trigger startGeneration', async () => {
+    const mockStartGen = vi.fn();
+    mockState.startGeneration = mockStartGen;
 
     const user = userEvent.setup();
     render(<ChatWorkspace />);
     
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /new chat/i }));
-    });
-    
-    // Wait for agents to load and be selected
     await screen.findByText(/General Agent/i);
     
     const input = screen.getByPlaceholderText(/ask mrpl ai workbench/i);
@@ -68,43 +81,39 @@ describe('ChatWorkspace UI', () => {
       await user.type(input, 'Hello agent{enter}');
     });
 
-    expect(mockStartStream).toHaveBeenCalledWith(
+    expect(mockStartGen).toHaveBeenCalledWith(
       'a1',
-      expect.any(String), // conversation id
+      'c1',
       'Hello agent',
       expect.any(Function)
     );
   });
 
-  it('renders streaming state correctly', async () => {
-    let mockIsStreaming = false;
-    (useSSE as any).mockImplementation(() => ({
-      isStreaming: mockIsStreaming,
-      startStream: vi.fn(async (_agentId, _convId, _msg, onEvent) => {
-        mockIsStreaming = true;
-        onEvent({ type: 'state_changed', state: 'CONTEXT_BUILDING' });
-      }),
-      stopStream: vi.fn(),
-    }));
+  it('renders streaming state, partial text, and stop button when isStreaming is active', async () => {
+    const mockStop = vi.fn();
+    mockState.isStreaming = true;
+    mockState.streamingConversationId = 'c1';
+    mockState.streamingText = '# Streaming Header\n\n- point one';
+    mockState.agentState = 'Generating response...';
+    mockState.stopGeneration = mockStop;
 
     const user = userEvent.setup();
     render(<ChatWorkspace />);
     
+    expect(await screen.findByRole('heading', { level: 1, name: 'Streaming Header' })).toBeInTheDocument();
+    expect(screen.getByText('point one')).toBeInTheDocument();
+    expect(screen.getByText('Generating response...')).toBeInTheDocument();
+
+    const stopBtn = screen.getByTitle(/stop generation/i);
+    expect(stopBtn).toBeInTheDocument();
+
     await act(async () => {
-      await user.click(screen.getByRole('button', { name: /new chat/i }));
+      await user.click(stopBtn);
     });
-    
-    await screen.findByText(/General Agent/i);
-    
-    const input = screen.getByPlaceholderText(/ask mrpl ai workbench/i);
-    await act(async () => {
-      await user.type(input, 'Hello agent{enter}');
-    });
-    
-    expect(await screen.findByText('Preparing context...')).toBeInTheDocument();
+    expect(mockStop).toHaveBeenCalledTimes(1);
   });
 
-  it('renders conversations list successfully without crashing on .map()', async () => {
+  it('renders conversations list successfully', async () => {
     const { chatApi } = await import('../api/chat');
     vi.mocked(chatApi.getConversations).mockResolvedValueOnce([
       { id: 'c-100', title: 'Refinery Yield Optimization', created_at: '', updated_at: '' },
@@ -117,29 +126,23 @@ describe('ChatWorkspace UI', () => {
     expect(await screen.findByText('Catalyst Replacement Schedule')).toBeInTheDocument();
   });
 
-  it('renders user-visible error when SSE stream emits an error event', async () => {
-    (useSSE as any).mockImplementation(() => ({
-      isStreaming: false,
-      startStream: vi.fn(async (_agentId, _convId, _msg, onEvent) => {
-        onEvent({ type: 'error', error: 'Model execution failed: model not found' });
-      }),
-      stopStream: vi.fn(),
-    }));
+  it('renders assistant messages with Markdown formatted elements', async () => {
+    const { chatApi } = await import('../api/chat');
+    vi.mocked(chatApi.getMessages).mockResolvedValueOnce([
+      {
+        id: 'm1',
+        conversation_id: 'c1',
+        role: 'assistant',
+        content: '## Executive Summary\n\n1. First item\n2. Second item\n\n```python\nprint(42)\n```',
+        created_at: new Date().toISOString()
+      }
+    ]);
 
-    const user = userEvent.setup();
     render(<ChatWorkspace />);
-    
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /new chat/i }));
-    });
-    
-    await screen.findByText(/General Agent/i);
-    
-    const input = screen.getByPlaceholderText(/ask mrpl ai workbench/i);
-    await act(async () => {
-      await user.type(input, 'Hello agent{enter}');
-    });
-    
-    expect(await screen.findByText(/⚠️ Error: Model execution failed: model not found/i)).toBeInTheDocument();
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Executive Summary' })).toBeInTheDocument();
+    expect(screen.getByText('First item')).toBeInTheDocument();
+    expect(screen.getByText('Second item')).toBeInTheDocument();
+    expect(screen.getByText('print(42)')).toBeInTheDocument();
   });
 });

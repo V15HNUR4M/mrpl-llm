@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ollama:
     # Pinned image version (Ollama 0.33.3 / sha256:32931b46719f673c05fdbaa81ccb26da18ea4a1c57590a754874ab28ba269eb2)
@@ -42,7 +40,7 @@ services:
       - VECTOR_DB_PATH=/app/data/chroma
       - ENABLE_OPENAPI=${ENABLE_OPENAPI:-false}
       - ENABLE_TEST_ENDPOINTS=${ENABLE_TEST_ENDPOINTS:-false}
-      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://localhost:80","http://127.0.0.1:80"]
+      - CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173","http://localhost:80","http://127.0.0.1:80"]
     volumes:
       - mrpl_data:/app/data
     healthcheck:

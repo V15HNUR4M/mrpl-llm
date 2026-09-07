@@ -36,7 +36,7 @@ export async function fetchClient<T>(endpoint: string, options: RequestInit = {}
     let message = 'An error occurred';
     try {
       const errorData = await response.json();
-      message = errorData.detail || message;
+      message = errorData.error?.message || errorData.detail || message;
     } catch {
       message = response.statusText;
     }

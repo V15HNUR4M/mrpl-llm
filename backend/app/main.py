@@ -145,6 +145,32 @@ async def lifespan(app: FastAPI):
             })
             await uow.commit()
 
+    # Ensure system_eval_runner exists and clean up legacy EVAL_DOC_* documents assigned to real users
+    try:
+        from app.core.evaluation.corpus import get_or_create_system_eval_user, SYSTEM_EVAL_USER_ID
+        await get_or_create_system_eval_user()
+
+        from app.db.models import Document
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            stmt = select(Document).where(
+                Document.filename.like("EVAL_DOC_%"),
+                (Document.owner_id != SYSTEM_EVAL_USER_ID) | (Document.access_scope != "EVALUATION")
+            )
+            res = await session.execute(stmt)
+            legacy_eval_docs = res.scalars().all()
+            for ldoc in legacy_eval_docs:
+                try:
+                    await app.state.rag_service.vector_store.delete_by_document_id(ldoc.id)
+                except Exception:
+                    pass
+                await session.delete(ldoc)
+            if legacy_eval_docs:
+                await session.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Evaluation cleanup warning: %s", e)
+
     # Initialize Workflow, Memory, and Multimodal services on app.state
     from app.core.workflow.engine import WorkflowEngine
     from app.services.semantic_memory import MemoryService
@@ -153,6 +179,8 @@ async def lifespan(app: FastAPI):
     app.state.workflow_engine = WorkflowEngine(uow, app.state.agent_harness, authorized_tool_executor)
     app.state.memory_service = MemoryService(uow)
     app.state.multimodal_service = MultimodalService(uow)
+    from app.core.runtime.generation_manager import GenerationManager
+    app.state.generation_manager = GenerationManager()
 
     yield
 

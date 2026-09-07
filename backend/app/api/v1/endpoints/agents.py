@@ -1,10 +1,9 @@
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-import json
 from pydantic import BaseModel
-from typing import List
 
 from app.db.uow import UnitOfWork, get_uow
 from app.services.conversation import ConversationService
@@ -157,6 +156,7 @@ async def stream_agent(
 ):
     registry = request.app.state.agent_registry
     harness = request.app.state.agent_harness
+    generation_manager = getattr(request.app.state, "generation_manager", None)
     
     try:
         agent = registry.get(agent_id)
@@ -195,7 +195,28 @@ async def stream_agent(
                 "agent_id": agent.agent_id
             })
             await uow.commit()
-            
+
+        if generation_manager:
+            record = await generation_manager.start_generation(
+                agent=agent,
+                harness=harness,
+                conversation_id=run_req.conversation_id,
+                user_id=current_user.id,
+                message=run_req.message,
+                recent_candidates=recent_candidates
+            )
+
+            async def event_generator():
+                try:
+                    async for event in generation_manager.subscribe_stream(record):
+                        yield f"data: {json.dumps(event)}\n\n"
+                except Exception as e:
+                    error_event = {"type": "error", "error": str(e)}
+                    yield f"data: {json.dumps(error_event)}\n\n"
+
+            return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+        # Fallback if generation_manager is not initialized (e.g. in some isolated test fixtures)
         session_id = str(uuid.uuid4())
         session = RuntimeSession(
             session_id=session_id,
@@ -205,7 +226,7 @@ async def stream_agent(
             user_id=current_user.id
         )
         
-        async def event_generator():
+        async def direct_event_generator():
             try:
                 initial_event = {"type": "session_created", "session_id": session_id}
                 yield f"data: {json.dumps(initial_event)}\n\n"
@@ -217,7 +238,6 @@ async def stream_agent(
                         final_answer = event.get("final_answer", "")
                         
                 if final_answer:
-                    # Use a new UoW context since the original dependency one may be bound to the request scope outside the generator in some setups, but we create a new one to be safe.
                     from app.db.database import AsyncSessionLocal
                     new_uow = UnitOfWork(session_factory=AsyncSessionLocal)
                     async with new_uow:
@@ -232,7 +252,64 @@ async def stream_agent(
                 error_event = {"type": "error", "error": str(e)}
                 yield f"data: {json.dumps(error_event)}\n\n"
                 
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        return StreamingResponse(direct_event_generator(), media_type="text/event-stream")
         
     except AgentNotFoundError:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+@router.get("/generations/active")
+async def get_active_generation(
+    request: Request,
+    conversation_id: Optional[str] = None,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    generation_manager = getattr(request.app.state, "generation_manager", None)
+    if not generation_manager:
+        return {"active": False, "generation": None}
+        
+    record = await generation_manager.get_active_generation(current_user.id, conversation_id)
+    if not record:
+        return {"active": False, "generation": None}
+        
+@router.get("/generations/{generation_id}/stream")
+async def subscribe_generation_stream(
+    request: Request,
+    generation_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    generation_manager = getattr(request.app.state, "generation_manager", None)
+    if not generation_manager:
+        raise HTTPException(status_code=404, detail="Generation manager not available")
+        
+    record = await generation_manager.get_generation(generation_id, current_user.id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Generation not found or access denied")
+        
+    async def event_generator():
+        try:
+            async for event in generation_manager.subscribe_stream(record):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            error_event = {"type": "error", "error": str(e)}
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.post("/generations/{generation_id}/stop")
+async def stop_generation(
+    request: Request,
+    generation_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    generation_manager = getattr(request.app.state, "generation_manager", None)
+    if not generation_manager:
+        raise HTTPException(status_code=404, detail="Generation manager not available")
+        
+    success = await generation_manager.cancel_generation(generation_id, current_user.id)
+    if not success:
+        record = await generation_manager.get_generation(generation_id, current_user.id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Generation not found or access denied")
+        return {"status": record.status, "message": f"Generation is already {record.status}"}
+        
+    return {"status": "cancelled", "message": "Generation successfully stopped"}

@@ -253,6 +253,27 @@
   cursor: not-allowed;
 }
 
+.stopBtn {
+  background: var(--color-status-error);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: var(--spacing-2);
+  margin-bottom: 4px;
+  transition: opacity 0.2s;
+}
+
+.stopBtn:hover {
+  opacity: 0.9;
+}
+
 .emptyState {
   display: flex;
   flex-direction: column;

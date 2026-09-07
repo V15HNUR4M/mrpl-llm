@@ -31,37 +31,66 @@ EVALUATION_CORPUS_DOCS: Dict[str, str] = {
 }
 
 
-async def ensure_evaluation_corpus_indexed(rag_service: RAGService, owner_id: Optional[str] = None) -> Dict[str, str]:
+SYSTEM_EVAL_USER_ID = "system_eval_runner"
+SYSTEM_EVAL_USERNAME = "eval_runner"
+SYSTEM_EVAL_ROLE = "SYSTEM"
+
+
+async def get_or_create_system_eval_user() -> str:
     """
-    Ensures that the canonical evaluation corpus documents are indexed in the
-    real production RAG system (Chroma vector store via nomic-embed-text) under owner_id.
-    Validates that owner_id exists in SQLite users table to satisfy foreign key constraints.
-    Returns mapping of {filename: document_id}.
+    Idempotently ensures that the dedicated system evaluation runner user exists.
     """
     from app.db.database import AsyncSessionLocal
     from app.db.models import User
+    from app.core.security import get_password_hash
     from sqlalchemy import select
+    import secrets
 
     async with AsyncSessionLocal() as session:
-        valid_user_id = None
-        if owner_id:
-            res = await session.execute(select(User.id).where(User.id == owner_id))
-            valid_user_id = res.scalar_one_or_none()
+        res = await session.execute(select(User).where(User.id == SYSTEM_EVAL_USER_ID))
+        user = res.scalar_one_or_none()
+        if not user:
+            res_name = await session.execute(select(User).where(User.username == SYSTEM_EVAL_USERNAME))
+            user = res_name.scalar_one_or_none()
+        
+        if not user:
+            user = User(
+                id=SYSTEM_EVAL_USER_ID,
+                username=SYSTEM_EVAL_USERNAME,
+                email="eval_runner@mrpl.local",
+                password_hash=get_password_hash(secrets.token_urlsafe(32)),
+                display_name="Evaluation Runner",
+                role=SYSTEM_EVAL_ROLE,
+                is_active=True,
+            )
+            session.add(user)
+            await session.commit()
+            return user.id
+        return user.id
 
-        if not valid_user_id:
-            # Fallback to superuser or any existing user
-            res = await session.execute(select(User.id).order_by(User.created_at.asc()).limit(1))
-            valid_user_id = res.scalar_one_or_none()
 
-    resolved_owner_id = valid_user_id or owner_id or "eval_owner"
+async def ensure_evaluation_corpus_indexed(rag_service: RAGService, owner_id: Optional[str] = None) -> Dict[str, str]:
+    """
+    Ensures that the canonical evaluation corpus documents are indexed in the
+    real production RAG system (Chroma vector store via nomic-embed-text) under
+    the dedicated system_eval_runner with access_scope="EVALUATION".
+    Returns mapping of {filename: document_id}.
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.db.models import Document
+    from sqlalchemy import select
 
-    existing_docs = await rag_service.list_documents(owner_id=resolved_owner_id)
-    existing_map = {}
-    for d in existing_docs:
-        fn = d.get("filename") if isinstance(d, dict) else getattr(d, "filename", "")
-        did = d.get("id") if isinstance(d, dict) else getattr(d, "id", "")
-        if fn and did:
-            existing_map[fn] = did
+    resolved_owner_id = owner_id or await get_or_create_system_eval_user()
+
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(
+            select(Document.id, Document.filename).where(
+                Document.owner_id == resolved_owner_id,
+                Document.access_scope == "EVALUATION"
+            )
+        )
+        existing_docs = res.all()
+        existing_map = {fn: did for did, fn in existing_docs}
 
     doc_ids = {}
     for filename, content in EVALUATION_CORPUS_DOCS.items():
@@ -73,7 +102,9 @@ async def ensure_evaluation_corpus_indexed(rag_service: RAGService, owner_id: Op
                 filename=filename,
                 mime_type="text/plain",
                 owner_id=resolved_owner_id,
+                access_scope="EVALUATION",
             )
             doc_ids[filename] = res.document_id
 
     return doc_ids
+

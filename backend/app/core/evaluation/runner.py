@@ -319,16 +319,11 @@ class EvaluationRunner:
         retrieved_texts: List[str] = []
 
         if self.rag_service:
-            # Ensure the canonical evaluation corpus is indexed under valid user
+            # Ensure the canonical evaluation corpus is indexed under dedicated system evaluation user
             if not getattr(self, "_corpus_owner_id", None):
                 try:
-                    from app.core.evaluation.corpus import ensure_evaluation_corpus_indexed
-                    from app.db.database import AsyncSessionLocal
-                    from app.db.models import User
-                    from sqlalchemy import select
-                    async with AsyncSessionLocal() as session:
-                        res_u = await session.execute(select(User.id).order_by(User.created_at.asc()).limit(1))
-                        self._corpus_owner_id = res_u.scalar_one_or_none()
+                    from app.core.evaluation.corpus import ensure_evaluation_corpus_indexed, get_or_create_system_eval_user
+                    self._corpus_owner_id = await get_or_create_system_eval_user()
                     await ensure_evaluation_corpus_indexed(self.rag_service, owner_id=self._corpus_owner_id)
                 except Exception as e:
                     details["corpus_index_warning"] = str(e)

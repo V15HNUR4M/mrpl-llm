@@ -6,9 +6,11 @@ pydantic
 pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt==4.0.1
 python-multipart
 pytest
 pytest-asyncio
 httpx
 chromadb>=0.4.24
 pypdf>=4.1.0
+email-validator
