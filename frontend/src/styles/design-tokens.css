@@ -1,39 +1,53 @@
 :root {
-  /* Color Palette */
+  /* Enterprise Industrial Palette */
+  --color-navy-950: #060d1d;
+  --color-navy-900: #0a152e;
+  --color-navy-850: #0f1c3d;
+  --color-navy-800: #14244f;
+  --color-navy-700: #1e3369;
+  
   --color-primary-900: #0a192f;
   --color-primary-800: #112240;
-  --color-primary-700: #233554;
-  --color-primary-600: #1d4ed8;
-  --color-primary-500: #2563eb;
-  --color-primary-400: #3b82f6;
+  --color-primary-700: #1e3a8a;
+  --color-primary-600: #2563eb;
+  --color-primary-500: #3b82f6;
+  --color-primary-400: #60a5fa;
+  --color-primary-100: #dbeafe;
+  --color-primary-50: #eff6ff;
   
   --color-surface-base: #ffffff;
   --color-surface-hover: #f8fafc;
   --color-surface-active: #f1f5f9;
-  --color-surface-sunken: #e2e8f0;
+  --color-surface-sunken: #f8fafc;
+  --color-surface-canvas: #f1f5f9;
   
   --color-text-strong: #0f172a;
   --color-text-base: #334155;
   --color-text-muted: #64748b;
-  --color-text-inverted: #f8fafc;
+  --color-text-subtle: #94a3b8;
+  --color-text-inverted: #ffffff;
   
   --color-border-subtle: #e2e8f0;
   --color-border-base: #cbd5e1;
   --color-border-strong: #94a3b8;
   
-  --color-status-success: #10b981;
-  --color-status-warning: #f59e0b;
-  --color-status-error: #ef4444;
-  --color-status-info: #3b82f6;
+  --color-status-success: #059669;
+  --color-status-success-bg: #ecfdf5;
+  --color-status-warning: #d97706;
+  --color-status-warning-bg: #fffbeb;
+  --color-status-error: #dc2626;
+  --color-status-error-bg: #fef2f2;
+  --color-status-info: #2563eb;
+  --color-status-info-bg: #eff6ff;
 
   /* Typography */
   --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   --font-family-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
   
   --font-size-xs: 0.75rem;
-  --font-size-sm: 0.875rem;
-  --font-size-base: 1rem;
-  --font-size-lg: 1.125rem;
+  --font-size-sm: 0.84rem;
+  --font-size-base: 0.9375rem;
+  --font-size-lg: 1.0625rem;
   --font-size-xl: 1.25rem;
   --font-size-2xl: 1.5rem;
   
@@ -45,19 +59,27 @@
   --spacing-5: 1.25rem;
   --spacing-6: 1.5rem;
   --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
   --spacing-12: 3rem;
   
-  /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  /* Radii - Consistent 10-14px border radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-pill: 9999px;
   
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  /* Shadows - Soft Enterprise Elevation */
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 8px -2px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 20px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.03);
+  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
   
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
+

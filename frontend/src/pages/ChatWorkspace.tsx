@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, PlusCircle, MessageSquare, Square, Download, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Send, User, Bot, Plus, MessageSquare, Square, Download, Trash2, ChevronDown, Shield, Cpu } from 'lucide-react';
 import { chatApi } from '../api/chat';
 import type { Conversation, Message } from '../api/chat';
 import { agentsApi } from '../api/agents';
@@ -7,6 +7,56 @@ import type { Agent } from '../api/agents';
 import { useGeneration } from '../context/GenerationContext';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import styles from './ChatWorkspace.module.css';
+
+interface ConversationGroup {
+  label: string;
+  items: Conversation[];
+}
+
+const getAgentIcon = (id: string = '', name: string = '') => {
+  const lower = (id + ' ' + name).toLowerCase();
+  if (lower.includes('excel')) return '📊';
+  if (lower.includes('document')) return '📄';
+  if (lower.includes('analysis')) return '🔍';
+  return '🧠';
+};
+
+const groupConversations = (list: Conversation[]): ConversationGroup[] => {
+  const today: Conversation[] = [];
+  const yesterday: Conversation[] = [];
+  const earlier: Conversation[] = [];
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+
+  list.forEach(conv => {
+    const dateStr = conv.updated_at || conv.created_at;
+    if (!dateStr) {
+      earlier.push(conv);
+      return;
+    }
+    const convTime = new Date(dateStr).getTime();
+    if (isNaN(convTime)) {
+      earlier.push(conv);
+    } else if (convTime >= startOfToday) {
+      today.push(conv);
+    } else if (convTime >= startOfYesterday) {
+      yesterday.push(conv);
+    } else {
+      earlier.push(conv);
+    }
+  });
+
+  const groups: ConversationGroup[] = [];
+  if (today.length > 0) groups.push({ label: 'Today', items: today });
+  if (yesterday.length > 0) groups.push({ label: 'Yesterday', items: yesterday });
+  if (earlier.length > 0) groups.push({ label: 'Earlier', items: earlier });
+  if (groups.length === 0 && list.length > 0) {
+    groups.push({ label: 'Conversations', items: list });
+  }
+  return groups;
+};
 
 const getFileCardDetails = (filename: string, fileType?: string) => {
   const ext = (fileType || filename.split('.').pop() || 'md').toLowerCase().replace(/^\./, '');
@@ -32,7 +82,6 @@ export const ChatWorkspace: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Use application-level GenerationContext (survives page navigation)
   const {
     activeConversationId,
     setActiveConversationId,
@@ -89,7 +138,6 @@ export const ChatWorkspace: React.FC = () => {
     }
   };
 
-  // Real-time title update from streaming events
   useEffect(() => {
     if (latestTitleUpdate) {
       setConversations(prev => prev.map(c => 
@@ -100,7 +148,6 @@ export const ChatWorkspace: React.FC = () => {
     }
   }, [latestTitleUpdate]);
 
-  // Load messages when conversation changes
   useEffect(() => {
     if (activeConversationId) {
       loadMessages(activeConversationId);
@@ -109,7 +156,6 @@ export const ChatWorkspace: React.FC = () => {
     }
   }, [activeConversationId]);
 
-  // Refresh messages and conversations when generation completes
   useEffect(() => {
     if (generationCompletedAt && activeConversationId) {
       loadMessages(activeConversationId);
@@ -184,8 +230,10 @@ export const ChatWorkspace: React.FC = () => {
 
     const userText = inputValue.trim();
     setInputValue('');
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     
-    // Optimistic user message in UI
     const userMsg: Message = {
       id: Date.now().toString(),
       conversation_id: convId,
@@ -195,13 +243,11 @@ export const ChatWorkspace: React.FC = () => {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Start generation managed at application level
     await startGeneration(
       selectedAgentId,
       convId,
       userText,
       (finalAnswer, sources, generatedFile) => {
-        // Optimistic assistant message upon completion before DB sync
         const meta: any = { sources };
         if (generatedFile) {
           meta.generated_file = generatedFile;
@@ -228,199 +274,303 @@ export const ChatWorkspace: React.FC = () => {
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value);
     e.target.style.height = 'auto';
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
   };
 
   const isCurrentConvStreaming = isStreaming && streamingConversationId === activeConversationId;
+  const currentAgent = useMemo(() => {
+    return agents.find(a => a.agent_id === selectedAgentId) || agents[0];
+  }, [agents, selectedAgentId]);
+
+  const groupedConversations = useMemo(() => {
+    return groupConversations(conversations);
+  }, [conversations]);
 
   return (
     <div className={styles.workspace}>
-      <div className={styles.sidebar}>
+      <aside className={styles.sidebar} aria-label="Chat History">
         <div className={styles.sidebarHeader}>
-          <button className={`btn btn-outline ${styles.newChatBtn}`} onClick={handleCreateNew}>
-            <PlusCircle size={16} /> New Chat
+          <button 
+            type="button" 
+            className={styles.newChatBtn} 
+            onClick={handleCreateNew}
+            aria-label="New Chat"
+          >
+            <Plus size={16} />
+            <span>New Chat</span>
           </button>
         </div>
+
         <div className={styles.conversationList}>
-          {conversations.map(conv => (
-            <div 
-              key={conv.id}
-              className={`${styles.conversationItem} ${activeConversationId === conv.id ? styles.conversationItemActive : ''}`}
-              onClick={() => setActiveConversationId(conv.id)}
-            >
-              <MessageSquare size={16} />
-              <span className={styles.conversationTitle}>{conv.title}</span>
-              <button
-                type="button"
-                className={styles.deleteConvBtn}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteError(null);
-                  setConvToDelete(conv);
-                }}
-                aria-label="Delete conversation"
-                title="Delete conversation"
-              >
-                <Trash2 size={14} />
-              </button>
+          {groupedConversations.map(group => (
+            <div key={group.label} className={styles.convGroup}>
+              <div className={styles.groupLabel}>{group.label}</div>
+              {group.items.map(conv => (
+                <div 
+                  key={conv.id}
+                  className={`${styles.conversationItem} ${activeConversationId === conv.id ? styles.conversationItemActive : ''}`}
+                  onClick={() => setActiveConversationId(conv.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      setActiveConversationId(conv.id);
+                    }
+                  }}
+                >
+                  <MessageSquare size={15} className={styles.conversationIcon} />
+                  <span className={styles.conversationTitle} title={conv.title}>{conv.title}</span>
+                  <button
+                    type="button"
+                    className={styles.deleteConvBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteError(null);
+                      setConvToDelete(conv);
+                    }}
+                    aria-label="Delete conversation"
+                    title="Delete conversation"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
             </div>
           ))}
+
+          {conversations.length === 0 && (
+            <div className={styles.emptyHistoryNotice}>
+              <span>No chat history</span>
+            </div>
+          )}
         </div>
-      </div>
+      </aside>
 
       <div className={styles.chatArea}>
         {activeConversationId ? (
           <>
-            <div className={styles.agentSelector}>
-              <span>Agent:</span>
-              <select 
-                className={styles.agentSelect}
-                value={selectedAgentId} 
-                onChange={e => setSelectedAgentId(e.target.value)}
-                disabled={isStreaming}
-              >
-                {agents.map(a => (
-                  <option key={a.agent_id} value={a.agent_id}>{a.name} ({a.version})</option>
-                ))}
-              </select>
-            </div>
+            <header className={styles.chatHeader}>
+              <div className={styles.agentSelector}>
+                <div className={styles.agentSelectorLabel}>
+                  <span className={styles.agentTag}>Agent</span>
+                  <span className={styles.agentStatusPill}>
+                    <span className={styles.statusDot}></span> Ready
+                  </span>
+                </div>
+                <div className={styles.agentControlWrap}>
+                  <span className={styles.agentEmoji}>
+                    {currentAgent ? getAgentIcon(currentAgent.agent_id, currentAgent.name) : '🧠'}
+                  </span>
+                  <select 
+                    className={styles.agentSelect}
+                    value={selectedAgentId} 
+                    onChange={e => setSelectedAgentId(e.target.value)}
+                    disabled={isStreaming}
+                    aria-label="Select Agent"
+                  >
+                    {agents.map(a => (
+                      <option key={a.agent_id} value={a.agent_id}>
+                        {a.name} ({a.version || 'v1.0'})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className={styles.selectChevron} />
+                </div>
+              </div>
+
+              <div className={styles.headerSecurityBadges}>
+                <div className={styles.securityBadge}>
+                  <Shield size={12} className={styles.securityIcon} />
+                  <span>On-Premise Llama 3.2</span>
+                </div>
+                <div className={styles.securityBadge}>
+                  <Cpu size={12} className={styles.securityIcon} />
+                  <span>Deterministic Audit</span>
+                </div>
+              </div>
+            </header>
             
             <div className={styles.messageList}>
-              {messages.map((msg, i) => (
-                <div key={msg.id || i} className={`${styles.messageWrapper}`}>
-                  <div className={`${styles.message} ${msg.role === 'user' ? styles.messageUser : ''}`}>
-                    <div className={`${styles.avatar} ${msg.role === 'user' ? styles.avatarUser : styles.avatarAssistant}`}>
-                      {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
-                    </div>
-                    <div className={styles.messageContent}>
-                      {msg.role === 'assistant' ? (
-                        <MarkdownRenderer content={msg.content} />
-                      ) : (
-                        msg.content
-                      )}
-                      {(() => {
-                        const genFile = msg.metadata?.generated_file || (msg as any).metadata_?.generated_file;
-                        if (!genFile) return null;
-                        const card = getFileCardDetails(genFile.filename, genFile.file_type);
-                        return (
-                          <div className={styles.fileCard}>
-                            <div className={styles.fileInfo}>
-                              <span className={styles.fileIcon}>{card.icon}</span>
-                              <div className={styles.fileText}>
-                                <span className={styles.fileName}>{genFile.filename}</span>
-                                {genFile.size_bytes ? (
-                                  <span className={styles.fileMeta}>{Math.round(genFile.size_bytes / 1024 * 10) / 10 || 1} KB • {card.label}</span>
-                                ) : (
-                                  <span className={styles.fileMeta}>{card.label}</span>
-                                )}
-                              </div>
-                            </div>
-                            <button 
-                              className={styles.downloadBtn}
-                              onClick={() => handleDownload(genFile.file_id, genFile.filename)}
-                              title={card.btnText}
-                            >
-                              <Download size={14} /> {card.btnText}
-                            </button>
+              <div className={styles.messageListInner}>
+                {messages.map((msg, i) => {
+                  const isUser = msg.role === 'user';
+                  if (isUser) {
+                    return (
+                      <div key={msg.id || i} className={styles.messageRowUser}>
+                        <div className={styles.messageUserBubble}>
+                          <div className={styles.messageContentUser}>
+                            {msg.content}
                           </div>
-                        );
-                      })()}
-                      {msg.metadata?.sources && msg.metadata.sources.length > 0 && (
-                        <div className={styles.sources}>
-                          <div className={styles.sourcesTitle}>Sources</div>
-                          {msg.metadata.sources.map((s: any, idx: number) => {
-                            let parsed: any = null;
-                            if (typeof s.content === 'string') {
-                              try { parsed = JSON.parse(s.content); } catch (e) {}
-                            } else if (typeof s.content === 'object') {
-                              parsed = s.content;
-                            }
-                            const filename = s.metadata?.filename || (parsed && parsed.filename) || s.source || 'Document';
-                            const section = s.metadata?.section || (parsed && parsed.section);
+                          <div className={styles.avatarUser}>
+                            <User size={13} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const genFile = msg.metadata?.generated_file || (msg as any).metadata_?.generated_file;
+                  const agentName = msg.agent_id 
+                    ? (agents.find(a => a.agent_id === msg.agent_id)?.name || msg.agent_id.replace(/_/g, ' '))
+                    : (currentAgent?.name || 'General Agent');
+
+                  return (
+                    <div key={msg.id || i} className={styles.messageRowAssistant}>
+                      <div className={styles.avatarAssistant}>
+                        <Bot size={16} />
+                      </div>
+                      <div className={styles.messageAssistantCard}>
+                        <div className={styles.assistantHeader}>
+                          <span className={styles.assistantAgentBadge}>
+                            {getAgentIcon(msg.agent_id || '', agentName)} {agentName}
+                          </span>
+                        </div>
+                        <div className={styles.messageContent}>
+                          <MarkdownRenderer content={msg.content} />
+                          
+                          {genFile && (() => {
+                            const card = getFileCardDetails(genFile.filename, genFile.file_type);
                             return (
-                              <div key={idx} className={styles.sourceChip}>
-                                <span className={styles.sourceDoc}>{filename}</span>
-                                {section && <span className={styles.sourceScore}>Section: {section}</span>}
+                              <div className={styles.fileCard}>
+                                <div className={styles.fileIconWrap}>
+                                  <span className={styles.fileIcon}>{card.icon}</span>
+                                </div>
+                                <div className={styles.fileInfo}>
+                                  <span className={styles.fileName} title={genFile.filename}>{genFile.filename}</span>
+                                  <span className={styles.fileMeta}>
+                                    {card.label} • {genFile.size_bytes ? `${Math.round(genFile.size_bytes / 1024 * 10) / 10 || 1} KB` : 'Ready'}
+                                  </span>
+                                </div>
+                                <button 
+                                  type="button"
+                                  className={styles.downloadBtn}
+                                  onClick={() => handleDownload(genFile.file_id, genFile.filename)}
+                                  title={card.btnText}
+                                  aria-label={card.btnText}
+                                >
+                                  <Download size={14} />
+                                  <span>{card.btnText}</span>
+                                </button>
                               </div>
                             );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              
-              {isCurrentConvStreaming && (
-                <div className={`${styles.messageWrapper}`}>
-                  <div className={styles.message}>
-                    <div className={`${styles.avatar} ${styles.avatarAssistant}`}>
-                      <Bot size={18} />
-                    </div>
-                    <div className={styles.messageContent}>
-                      {streamingText ? (
-                        <MarkdownRenderer content={streamingText} />
-                      ) : null}
-                      {streamingFile && (() => {
-                        const card = getFileCardDetails(streamingFile.filename, streamingFile.file_type);
-                        return (
-                          <div className={styles.fileCard}>
-                            <div className={styles.fileInfo}>
-                              <span className={styles.fileIcon}>{card.icon}</span>
-                              <div className={styles.fileText}>
-                                <span className={styles.fileName}>{streamingFile.filename}</span>
-                                {streamingFile.size_bytes ? (
-                                  <span className={styles.fileMeta}>{Math.round(streamingFile.size_bytes / 1024 * 10) / 10 || 1} KB • {card.label}</span>
-                                ) : (
-                                  <span className={styles.fileMeta}>{card.label}</span>
-                                )}
+                          })()}
+
+                          {msg.metadata?.sources && msg.metadata.sources.length > 0 && (
+                            <div className={styles.sources}>
+                              <div className={styles.sourcesTitle}>EVIDENCE CITATIONS</div>
+                              <div className={styles.sourcesList}>
+                                {msg.metadata.sources.map((s: any, idx: number) => {
+                                  let parsed: any = null;
+                                  if (typeof s.content === 'string') {
+                                    try { parsed = JSON.parse(s.content); } catch (e) {}
+                                  } else if (typeof s.content === 'object') {
+                                    parsed = s.content;
+                                  }
+                                  const filename = s.metadata?.filename || (parsed && parsed.filename) || s.source || 'Document';
+                                  const section = s.metadata?.section || (parsed && parsed.section);
+                                  return (
+                                    <div key={idx} className={styles.sourceChip} title={filename}>
+                                      <span className={styles.sourceIcon}>📄</span>
+                                      <span className={styles.sourceDoc}>{filename}</span>
+                                      {section && <span className={styles.sourceScore}>§ {section}</span>}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
-                            <button 
-                              className={styles.downloadBtn}
-                              onClick={() => handleDownload(streamingFile.file_id, streamingFile.filename)}
-                              title={card.btnText}
-                            >
-                              <Download size={14} /> {card.btnText}
-                            </button>
-                          </div>
-                        );
-                      })()}
-                      {(!streamingText || agentState) && (
-                        <div className={styles.agentState}>
-                          <div className="spinner dark" style={{ width: 12, height: 12, borderWidth: 1 }}></div>
-                          {agentState}
+                          )}
                         </div>
-                      )}
-                      {streamingSources.length > 0 && (
-                        <div className={styles.sources}>
-                          <div className={styles.sourcesTitle}>Retrieved Sources</div>
-                          {streamingSources.map((s, idx) => {
-                            let parsed: any = null;
-                            if (typeof s.content === 'string') {
-                              try { parsed = JSON.parse(s.content); } catch (e) {}
-                            } else if (typeof s.content === 'object') {
-                              parsed = s.content;
-                            }
-                            const filename = s.metadata?.filename || (parsed && parsed.filename) || s.source || 'Document';
-                            return (
-                              <div key={idx} className={styles.sourceChip}>
-                                <span className={styles.sourceDoc}>{filename}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                {isCurrentConvStreaming && (
+                  <div className={styles.messageRowAssistant}>
+                    <div className={`${styles.avatarAssistant} ${styles.avatarStreaming}`}>
+                      <Bot size={16} />
+                    </div>
+                    <div className={styles.messageAssistantCard}>
+                      <div className={styles.assistantHeader}>
+                        <span className={styles.assistantAgentBadge}>
+                          {getAgentIcon(selectedAgentId, currentAgent?.name)} {currentAgent?.name || 'General Agent'}
+                        </span>
+                        <span className={styles.streamingIndicatorBadge}>
+                          <span className={styles.pulsingDot}></span> Streaming
+                        </span>
+                      </div>
+                      <div className={styles.messageContent}>
+                        {streamingText ? (
+                          <MarkdownRenderer content={streamingText} />
+                        ) : null}
+
+                        {streamingFile && (() => {
+                          const card = getFileCardDetails(streamingFile.filename, streamingFile.file_type);
+                          return (
+                            <div className={styles.fileCard}>
+                              <div className={styles.fileIconWrap}>
+                                <span className={styles.fileIcon}>{card.icon}</span>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                              <div className={styles.fileInfo}>
+                                <span className={styles.fileName} title={streamingFile.filename}>{streamingFile.filename}</span>
+                                <span className={styles.fileMeta}>
+                                  {card.label} • {streamingFile.size_bytes ? `${Math.round(streamingFile.size_bytes / 1024 * 10) / 10 || 1} KB` : 'Ready'}
+                                </span>
+                              </div>
+                              <button 
+                                type="button"
+                                className={styles.downloadBtn}
+                                onClick={() => handleDownload(streamingFile.file_id, streamingFile.filename)}
+                                title={card.btnText}
+                                aria-label={card.btnText}
+                              >
+                                <Download size={14} />
+                                <span>{card.btnText}</span>
+                              </button>
+                            </div>
+                          );
+                        })()}
+
+                        {(!streamingText || agentState) && (
+                          <div className={styles.agentState}>
+                            <div className="spinner dark" style={{ width: 12, height: 12, borderWidth: 2 }}></div>
+                            <span>{agentState}</span>
+                          </div>
+                        )}
+
+                        {streamingSources.length > 0 && (
+                          <div className={styles.sources}>
+                            <div className={styles.sourcesTitle}>RETRIEVED SOURCES</div>
+                            <div className={styles.sourcesList}>
+                              {streamingSources.map((s, idx) => {
+                                let parsed: any = null;
+                                if (typeof s.content === 'string') {
+                                  try { parsed = JSON.parse(s.content); } catch (e) {}
+                                } else if (typeof s.content === 'object') {
+                                  parsed = s.content;
+                                }
+                                const filename = s.metadata?.filename || (parsed && parsed.filename) || s.source || 'Document';
+                                return (
+                                  <div key={idx} className={styles.sourceChip} title={filename}>
+                                    <span className={styles.sourceIcon}>📄</span>
+                                    <span className={styles.sourceDoc}>{filename}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
+                )}
+                
+                <div ref={messagesEndRef} />
+              </div>
             </div>
 
-            <div className={styles.composer}>
-              <div className={styles.composerInner}>
+            <div className={styles.composerWrapper}>
+              <div className={styles.composerCard}>
                 <textarea
                   ref={inputRef}
                   className={styles.composerInput}
@@ -430,34 +580,73 @@ export const ChatWorkspace: React.FC = () => {
                   onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
+                  aria-label="Ask MRPL AI Workbench"
                 />
-                {isStreaming ? (
-                  <button 
-                    className={styles.stopBtn}
-                    onClick={stopGeneration}
-                    title="Stop Generation"
-                    aria-label="Stop Generation"
-                  >
-                    <Square size={14} fill="currentColor" />
-                  </button>
-                ) : (
-                  <button 
-                    className={styles.sendBtn} 
-                    onClick={handleSend}
-                    disabled={!inputValue.trim()}
-                    aria-label="Send message"
-                  >
-                    <Send size={16} />
-                  </button>
-                )}
+                <div className={styles.composerActions}>
+                  <div className={styles.composerHint}>
+                    <span>↵ Send</span>
+                    <span className={styles.hintDot}>•</span>
+                    <span>Shift+↵ New line</span>
+                  </div>
+                  {isStreaming ? (
+                    <button 
+                      type="button"
+                      className={styles.stopBtn}
+                      onClick={stopGeneration}
+                      title="Stop Generation"
+                      aria-label="Stop Generation"
+                    >
+                      <Square size={13} fill="currentColor" />
+                      <span>Stop</span>
+                    </button>
+                  ) : (
+                    <button 
+                      type="button"
+                      className={styles.sendBtn} 
+                      onClick={handleSend}
+                      disabled={!inputValue.trim()}
+                      title="Send message"
+                      aria-label="Send message"
+                    >
+                      <Send size={15} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </>
         ) : (
           <div className={styles.emptyState}>
-            <Bot size={48} color="var(--color-border-strong)" style={{ marginBottom: 16 }} />
-            <h2>Welcome to MRPL AI Workbench</h2>
-            <p>Select or create a new conversation to get started.</p>
+            <div className={styles.emptyHero}>
+              <div className={styles.emptyIconWrap}>
+                <Bot size={42} className={styles.emptyIcon} />
+              </div>
+              <h2>Welcome to MRPL AI Workbench</h2>
+              <p className={styles.emptySub}>Sovereign, On-Premise Industrial AI Assistant</p>
+              
+              <div className={styles.emptyCapabilities}>
+                <div className={styles.capPill}>
+                  <span>🏭 Refinery Procedures</span>
+                </div>
+                <div className={styles.capPill}>
+                  <span>📊 Crude Oil Spreadsheets</span>
+                </div>
+                <div className={styles.capPill}>
+                  <span>📄 Technical Manuals</span>
+                </div>
+                <div className={styles.capPill}>
+                  <span>⚙️ Equipment Maintenance</span>
+                </div>
+              </div>
+
+              <button 
+                type="button"
+                className={`btn btn-primary ${styles.emptyStartBtn}`}
+                onClick={handleCreateNew}
+              >
+                <Plus size={16} /> Start a New Conversation
+              </button>
+            </div>
           </div>
         )}
       </div>

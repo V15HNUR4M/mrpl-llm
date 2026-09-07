@@ -11,10 +11,11 @@ html, body {
   font-family: var(--font-family-sans);
   font-size: var(--font-size-base);
   color: var(--color-text-strong);
-  background-color: var(--color-surface-sunken);
+  background-color: var(--color-surface-canvas);
   height: 100vh;
   overflow: hidden;
-  line-height: 1.5;
+  line-height: 1.55;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -28,14 +29,15 @@ html, body {
 /* Typography Base */
 h1, h2, h3, h4, h5, h6 {
   margin-top: 0;
-  margin-bottom: var(--spacing-4);
+  margin-bottom: var(--spacing-3);
   font-weight: 600;
   color: var(--color-text-strong);
+  letter-spacing: -0.02em;
 }
 
 p {
   margin-top: 0;
-  margin-bottom: var(--spacing-4);
+  margin-bottom: var(--spacing-3);
   color: var(--color-text-base);
 }
 
@@ -46,7 +48,26 @@ a {
 }
 
 a:hover {
-  color: var(--color-primary-500);
+  color: var(--color-primary-700);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-base);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
 }
 
 /* Reusable global components */
@@ -58,48 +79,67 @@ a:hover {
   padding: var(--spacing-2) var(--spacing-4);
   font-size: var(--font-size-sm);
   font-weight: 500;
+  font-family: inherit;
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
   border: 1px solid transparent;
+  user-select: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .btn-primary {
   background-color: var(--color-primary-600);
   color: var(--color-text-inverted);
+  box-shadow: var(--shadow-xs);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: var(--color-primary-500);
+  background-color: var(--color-primary-700);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-outline {
-  background-color: transparent;
+  background-color: var(--color-surface-base);
   border-color: var(--color-border-base);
   color: var(--color-text-strong);
+  box-shadow: var(--shadow-xs);
 }
 
 .btn-outline:hover:not(:disabled) {
   background-color: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
 }
 
 .btn-danger {
   background-color: var(--color-status-error);
   color: var(--color-text-inverted);
+  box-shadow: var(--shadow-xs);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+  box-shadow: var(--shadow-sm);
 }
 
 .input-field {
   width: 100%;
-  padding: var(--spacing-2) var(--spacing-3);
+  padding: 0.55rem 0.8rem;
   font-size: var(--font-size-sm);
+  font-family: inherit;
   border: 1px solid var(--color-border-base);
   border-radius: var(--radius-md);
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   background-color: var(--color-surface-base);
   color: var(--color-text-strong);
 }
@@ -107,7 +147,11 @@ a:hover {
 .input-field:focus {
   outline: none;
   border-color: var(--color-primary-500);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.input-field::placeholder {
+  color: var(--color-text-subtle);
 }
 
 .label {
@@ -128,7 +172,7 @@ a:hover {
 }
 
 .spinner.dark {
-  border: 2px solid rgba(0, 0, 0, 0.1);
+  border: 2px solid rgba(0, 0, 0, 0.12);
   border-top-color: var(--color-primary-600);
 }
 
@@ -137,3 +181,4 @@ a:hover {
     transform: rotate(360deg);
   }
 }
+

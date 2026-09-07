@@ -29,6 +29,7 @@ export interface Message {
   conversation_id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  agent_id?: string;
   created_at: string;
   metadata?: Record<string, any>;
   metadata_?: Record<string, any>;
