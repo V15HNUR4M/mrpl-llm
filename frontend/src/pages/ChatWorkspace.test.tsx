@@ -145,4 +145,30 @@ describe('ChatWorkspace UI', () => {
     expect(screen.getByText('Second item')).toBeInTheDocument();
     expect(screen.getByText('print(42)')).toBeInTheDocument();
   });
+
+  it('renders downloadable markdown file card when message contains generated_file', async () => {
+    const { chatApi } = await import('../api/chat');
+    vi.mocked(chatApi.getMessages).mockResolvedValueOnce([
+      {
+        id: 'm2',
+        conversation_id: 'c1',
+        role: 'assistant',
+        content: 'Here is your generated infrastructure report.',
+        created_at: new Date().toISOString(),
+        metadata: {
+          generated_file: {
+            file_id: 'file-xyz-123',
+            filename: 'infrastructure-report.md',
+            size_bytes: 4096
+          }
+        }
+      }
+    ]);
+
+    render(<ChatWorkspace />);
+
+    expect(await screen.findByText('infrastructure-report.md')).toBeInTheDocument();
+    const downloadBtn = screen.getByRole('button', { name: /download markdown/i });
+    expect(downloadBtn).toBeInTheDocument();
+  });
 });

@@ -37,6 +37,12 @@ async def generate(request: Request, chat_req: ChatRequest):
     # 3. Create Generation Request
     model_id = chat_req.model or settings.DEFAULT_CHAT_MODEL
     gen_req = engine.convert_to_generation_request(package, model_id, stream=chat_req.stream)
+    req_id = request.headers.get("X-Request-ID")
+    corr_id = request.headers.get("X-Correlation-ID") or req_id
+    if req_id:
+        gen_req.metadata["request_id"] = req_id
+    if corr_id:
+        gen_req.metadata["correlation_id"] = corr_id
 
     # 4. Route to Gateway
     if chat_req.stream:

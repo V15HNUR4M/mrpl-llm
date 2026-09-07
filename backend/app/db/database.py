@@ -17,6 +17,16 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.execute("PRAGMA synchronous=NORMAL;")
     cursor.close()
 
+import os
+
+# Ensure parent directory of SQLite database exists
+if settings.SQLITE_URL.startswith("sqlite"):
+    db_path = settings.SQLITE_URL.split(":///")[-1]
+    if db_path and not db_path.startswith(":memory:"):
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+
 engine = create_async_engine(
     settings.SQLITE_URL,
     echo=False,

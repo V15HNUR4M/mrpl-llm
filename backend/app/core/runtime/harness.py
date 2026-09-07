@@ -1,6 +1,7 @@
 import asyncio
 import uuid
-from typing import Dict, Any, List, AsyncGenerator
+import re
+from typing import Dict, Any, List, Optional, AsyncGenerator
 import json
 
 from app.core.agent.registry import AgentRegistry, AgentDefinition
@@ -127,7 +128,12 @@ class AgentHarness:
             try:
                 tool_result = await self.tool_executor.execute(
                     tool_req, 
-                    context={"session_id": session.session_id, "agent_id": agent.agent_id, "user_id": session.user_id}
+                    context={
+                        "session_id": session.session_id,
+                        "agent_id": agent.agent_id,
+                        "user_id": session.user_id,
+                        "conversation_id": session.conversation_id
+                    }
                 )
                 
                 if tool_result.status == "error":
@@ -135,7 +141,7 @@ class AgentHarness:
                 else:
                     result_str = json.dumps(tool_result.output)
                     
-                session.add_event("tool_completed", {"tool": tool_req.tool, "call_id": tool_req.call_id})
+                session.add_event("tool_completed", {"tool": tool_req.tool, "call_id": tool_req.call_id, "result": tool_result.output})
                 
                 candidates.append(ContextCandidate(
                     id=tool_req.call_id, type="tool", content=result_str, source=tool_req.tool, priority=4
@@ -251,12 +257,15 @@ class AgentHarness:
             
             from app.core.config import settings
             gen_req = self.context_engine.convert_to_generation_request(package, settings.DEFAULT_CHAT_MODEL)
+            gen_req.metadata["user_id"] = session.user_id
+            gen_req.metadata["session_id"] = session.session_id
+            gen_req.metadata["correlation_id"] = session.metadata.get("correlation_id", session.session_id)
             
             response = await self.gateway.generate(gen_req)
             session.add_event("model_generation_completed", {"usage": response.usage.model_dump()})
             
             session.transition_to(ExecutionState.PROCESSING_RESULT)
-            decision = self._parse_decision(response)
+            decision = self._parse_decision(response, agent=agent, user_input=initial_input, session=session)
             await self._emit_telemetry("agent.step.completed", session, status="success", metadata={"step": step_idx})
             
             candidates.append(ContextCandidate(
@@ -320,6 +329,9 @@ class AgentHarness:
             
             from app.core.config import settings
             gen_req = self.context_engine.convert_to_generation_request(package, settings.DEFAULT_CHAT_MODEL, stream=True)
+            gen_req.metadata["user_id"] = session.user_id
+            gen_req.metadata["session_id"] = session.session_id
+            gen_req.metadata["correlation_id"] = session.metadata.get("correlation_id", session.session_id)
             
             full_text = ""
             async for chunk in self.gateway.stream(gen_req):
@@ -335,7 +347,7 @@ class AgentHarness:
             class DummyResponse:
                 def __init__(self, text):
                     self.text = text
-            decision = self._parse_decision(DummyResponse(full_text))
+            decision = self._parse_decision(DummyResponse(full_text), agent=agent, user_input=initial_input, session=session)
             
             candidates.append(ContextCandidate(
                 id=str(uuid.uuid4()), type="message", content=full_text, metadata={"role": "assistant"}, priority=5
@@ -357,10 +369,18 @@ class AgentHarness:
                 
             yield {"type": "state_changed", "state": session.state.value}
 
-    def _parse_decision(self, response: Any) -> AgentDecision:
+    def _parse_decision(
+        self,
+        response: Any,
+        agent: Optional[AgentDefinition] = None,
+        user_input: Optional[str] = None,
+        session: Optional[RuntimeSession] = None
+    ) -> AgentDecision:
         """
-        Extracts tool calls or final answers using structured provider response.
+        Extracts tool calls or final answers using structured provider response,
+        JSON action blocks, or Excel Agent spreadsheet-generation workflow.
         """
+        # 1. Provider tool calls
         if hasattr(response, "tool_calls") and response.tool_calls:
             tool_requests = []
             for tc in response.tool_calls:
@@ -372,5 +392,61 @@ class AgentHarness:
                     )
                 )
             return AgentDecision(tool_requests=tool_requests)
-            
-        return AgentDecision(final_answer=response.text.strip())
+
+        text = getattr(response, "text", "") or ""
+        text_clean = text.strip()
+
+        # 2. Structured JSON tool call blocks in text
+        allowed_tools = agent.tool_permissions.allowed if (agent and agent.tool_permissions) else []
+        json_blocks = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text_clean)
+        for block in json_blocks:
+            try:
+                obj = json.loads(block)
+                if isinstance(obj, dict) and ("tool" in obj or "name" in obj):
+                    tool_name = obj.get("tool") or obj.get("name")
+                    if not allowed_tools or tool_name in allowed_tools:
+                        return AgentDecision(tool_requests=[
+                            ToolRequest(
+                                tool=tool_name,
+                                arguments=obj.get("arguments", {}),
+                                call_id=str(uuid.uuid4())
+                            )
+                        ])
+            except Exception:
+                pass
+
+        # 3. Excel Agent Spreadsheet Generation Workflow Selection
+        if agent and agent.agent_id == "excel_agent" and user_input:
+            has_already_created = False
+            if session:
+                has_already_created = any(
+                    e.type == "tool_completed" and e.data.get("tool") == "create_workbook"
+                    for e in session.events
+                )
+            if not has_already_created:
+                from app.core.runtime.task_router import TaskRouter
+                from app.core.excel.table_parser import extract_tabular_data
+                from app.services.file_export.file_manager import derive_filename
+
+                is_excel_intent = TaskRouter.should_route_to_excel_agent(user_input) or any(
+                    k in user_input.lower() for k in ("create", "generate", "build", "make", "spreadsheet", "workbook", "excel", ".xlsx")
+                )
+                if is_excel_intent:
+                    session_events = [e.model_dump() for e in session.events] if session else None
+                    headers, rows = extract_tabular_data(text_clean, session_events=session_events, user_input=user_input)
+                    if headers and rows:
+                        filename = derive_filename(user_input, ext=".xlsx")
+                        return AgentDecision(tool_requests=[
+                            ToolRequest(
+                                tool="create_workbook",
+                                arguments={
+                                    "sheet_name": "Data",
+                                    "headers": headers,
+                                    "rows": rows,
+                                    "output_filename": filename
+                                },
+                                call_id=str(uuid.uuid4())
+                            )
+                        ])
+
+        return AgentDecision(final_answer=text_clean)

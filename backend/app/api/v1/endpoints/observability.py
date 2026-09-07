@@ -58,7 +58,31 @@ async def list_telemetry_events(
         limit=limit,
         offset=offset
     )
-    return events
+    res_items = []
+    for e in events:
+        meta = e.metadata_ or {}
+        res_items.append(
+            TelemetryEventResponse(
+                id=e.id,
+                timestamp=e.timestamp,
+                event_type=e.event_type,
+                component=e.component,
+                severity=e.severity,
+                user_id=e.user_id,
+                request_id=e.request_id,
+                correlation_id=e.correlation_id,
+                session_id=e.session_id,
+                span_id=e.span_id,
+                trace_id=e.trace_id,
+                agent_id=meta.get("agent_id") or meta.get("target_agent"),
+                operation=meta.get("operation") or meta.get("tool") or meta.get("task"),
+                duration_ms=e.duration_ms,
+                status=e.status,
+                error_type=e.error_type,
+                metadata=meta
+            )
+        )
+    return res_items
 
 @router.get("/events/{event_id}", response_model=TelemetryEventResponse)
 async def get_telemetry_event(
@@ -75,11 +99,27 @@ async def get_telemetry_event(
         is_admin=is_admin
     )
     if not event:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Telemetry event not found"
-        )
-    return event
+        raise HTTPException(status_code=404, detail="Telemetry event not found")
+    meta = event.metadata_ or {}
+    return TelemetryEventResponse(
+        id=event.id,
+        timestamp=event.timestamp,
+        event_type=event.event_type,
+        component=event.component,
+        severity=event.severity,
+        user_id=event.user_id,
+        request_id=event.request_id,
+        correlation_id=event.correlation_id,
+        session_id=event.session_id,
+        span_id=event.span_id,
+        trace_id=event.trace_id,
+        agent_id=meta.get("agent_id") or meta.get("target_agent"),
+        operation=meta.get("operation") or meta.get("tool") or meta.get("task"),
+        duration_ms=event.duration_ms,
+        status=event.status,
+        error_type=event.error_type,
+        metadata=meta
+    )
 
 @router.post("/cleanup", response_model=Dict[str, Any])
 async def trigger_retention_cleanup(

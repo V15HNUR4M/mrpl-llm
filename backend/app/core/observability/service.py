@@ -75,9 +75,24 @@ class IObservabilityService(ABC):
 
 
 class ObservabilityService(IObservabilityService):
-    def __init__(self, uow: Optional[UnitOfWork] = None, metrics: Optional[MetricsRegistry] = None):
-        self._uow = uow or get_uow()
+    def __init__(
+        self,
+        uow: Optional[UnitOfWork] = None,
+        metrics: Optional[MetricsRegistry] = None,
+        uow_factory: Optional[Any] = None
+    ):
+        self._explicit_uow = uow
+        self._uow_factory = uow_factory or get_uow
         self._metrics = metrics or default_metrics
+
+    def _get_uow(self) -> UnitOfWork:
+        if self._explicit_uow is not None:
+            return self._explicit_uow
+        return self._uow_factory()
+
+    @property
+    def _uow(self) -> UnitOfWork:
+        return self._get_uow()
 
     async def emit_event(self, event: TelemetryEventCreate) -> Optional[str]:
         # 1. Update in-memory metrics synchronously first
@@ -89,6 +104,10 @@ class ObservabilityService(IObservabilityService):
         # 2. Persist to database with explicit resilience boundary
         try:
             cleaned_metadata = sanitize_metadata(event.metadata)
+            if event.agent_id:
+                cleaned_metadata["agent_id"] = event.agent_id
+            if event.operation:
+                cleaned_metadata["operation"] = event.operation
             
             db_event = TelemetryEvent(
                 event_type=event.event_type,
@@ -106,7 +125,7 @@ class ObservabilityService(IObservabilityService):
                 metadata_=cleaned_metadata
             )
 
-            async with self._uow as u:
+            async with self._get_uow() as u:
                 u.telemetry_events.add(db_event)
                 await u.commit()
                 return db_event.id
@@ -116,6 +135,9 @@ class ObservabilityService(IObservabilityService):
             logger.error(f"Failed to persist telemetry event [{event.event_type}]: {e}", exc_info=False)
             return None
 
+    # Alias for API compatibility
+    record_event = emit_event
+
     def _update_metrics_from_event(self, event: TelemetryEventCreate) -> None:
         c = event.component.lower()
         st = (event.status or "").lower()
@@ -124,6 +146,11 @@ class ObservabilityService(IObservabilityService):
 
         if event.duration_ms is not None and event.duration_ms >= 0:
             self._metrics.record_latency(f"{c}_latency_ms", float(event.duration_ms))
+            if event.event_type.startswith("model."):
+                self._metrics.record_latency("model_latency_ms", float(event.duration_ms))
+                self._metrics.record_latency("model_gateway_latency_ms", float(event.duration_ms))
+            elif c == "agent" or event.event_type.startswith("agent."):
+                self._metrics.record_latency("agent_latency_ms", float(event.duration_ms))
 
         if st in ("failed", "error"):
             self._metrics.increment(f"{c}_failures_total")
@@ -137,7 +164,7 @@ class ObservabilityService(IObservabilityService):
             self._metrics.increment(f"{c}_success_total")
 
         # Specific metric mappings
-        if event.event_type.startswith("model."):
+        if event.event_type.startswith(("model.", "llm.")) or c in ("model", "llm"):
             self._metrics.increment("model_requests_total")
             if st in ("failed", "error"):
                 self._metrics.increment("model_failures_total")
@@ -149,7 +176,7 @@ class ObservabilityService(IObservabilityService):
                 if "output_tokens" in event.metadata:
                     self._metrics.increment("model_output_tokens_total", int(event.metadata["output_tokens"]))
 
-        elif event.event_type.startswith("tool."):
+        elif event.event_type.startswith(("tool.", "excel.")) or c == "tool":
             self._metrics.increment("tool_calls_total")
             if st == "denied":
                 self._metrics.increment("tool_denials_total")
@@ -196,7 +223,7 @@ class ObservabilityService(IObservabilityService):
         limit: int = 50,
         offset: int = 0
     ) -> List[TelemetryEvent]:
-        async with self._uow as u:
+        async with self._get_uow() as u:
             return await u.telemetry_events.query_events(
                 user_id=user_id,
                 is_admin=is_admin,
@@ -214,7 +241,7 @@ class ObservabilityService(IObservabilityService):
         user_id: Optional[str] = None,
         is_admin: bool = False
     ) -> Optional[TelemetryEvent]:
-        async with self._uow as u:
+        async with self._get_uow() as u:
             return await u.telemetry_events.get_for_user(
                 event_id=event_id,
                 user_id=user_id,
@@ -228,9 +255,27 @@ class ObservabilityService(IObservabilityService):
     ) -> Dict[str, Any]:
         snapshot = self._metrics.get_snapshot()
         # Include count of stored telemetry events from DB
-        async with self._uow as u:
+        async with self._get_uow() as u:
             db_event_count = await u.telemetry_events.count_events(user_id=user_id, is_admin=is_admin)
         snapshot["counters"]["persisted_events_total"] = db_event_count
+        
+        # Ensure aggregate operations count is available
+        total_ops = (
+            snapshot["counters"].get("model_requests_total", 0) +
+            snapshot["counters"].get("tool_calls_total", 0) +
+            snapshot["counters"].get("workflow_runs_total", 0) +
+            snapshot["counters"].get("agent_events_total", 0) +
+            snapshot["counters"].get("rag_queries_total", 0)
+        )
+        snapshot["counters"]["total_operations"] = total_ops
+
+        total_fails = (
+            snapshot["counters"].get("model_failures_total", 0) +
+            snapshot["counters"].get("tool_failures_total", 0) +
+            snapshot["counters"].get("workflow_failures_total", 0) +
+            snapshot["counters"].get("agent_failures_total", 0)
+        )
+        snapshot["counters"]["total_failures"] = total_fails
         return snapshot
 
     async def get_health(self) -> HealthStatus:
@@ -241,8 +286,11 @@ class ObservabilityService(IObservabilityService):
         db_start = datetime.now(timezone.utc)
         try:
             from sqlalchemy import text
-            async with self._uow as u:
-                await u.session.execute(text("SELECT 1"))
+            async with self._get_uow() as u:
+                res = await u.session.execute(text("SELECT 1"))
+                val = res.scalar()
+                if val != 1:
+                    raise ValueError(f"Unexpected scalar: {val}")
             db_lat = (datetime.now(timezone.utc) - db_start).total_seconds() * 1000.0
             dependencies["database"] = DependencyHealth(status="healthy", latency_ms=round(db_lat, 2))
         except Exception as e:
@@ -268,7 +316,7 @@ class ObservabilityService(IObservabilityService):
         max_age_days: int = 30,
         max_rows: int = 50000
     ) -> int:
-        async with self._uow as u:
+        async with self._get_uow() as u:
             count = await u.telemetry_events.cleanup_retention(
                 max_age_days=max_age_days,
                 max_rows=max_rows

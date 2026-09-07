@@ -1,4 +1,4 @@
-import { fetchClient } from './client';
+import { fetchClient, API_BASE_URL, getAuthToken } from './client';
 
 export interface PaginationInfo {
   limit: number;
@@ -18,6 +18,12 @@ export interface Conversation {
   updated_at: string;
 }
 
+export interface GeneratedFileMetadata {
+  file_id: string;
+  filename: string;
+  size_bytes?: number;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -25,6 +31,7 @@ export interface Message {
   content: string;
   created_at: string;
   metadata?: Record<string, any>;
+  metadata_?: Record<string, any>;
 }
 
 export const chatApi = {
@@ -56,5 +63,27 @@ export const chatApi = {
     fetchClient<Message>(`/conversations/${conversationId}/messages`, {
       method: 'POST',
       body: JSON.stringify({ role, content })
-    })
+    }),
+
+  downloadGeneratedFile: async (fileId: string, filename: string): Promise<void> => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${API_BASE_URL}/files/download/${fileId}`, { headers });
+    if (!res.ok) {
+      throw new Error(`Failed to download file: ${res.statusText}`);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }
 };

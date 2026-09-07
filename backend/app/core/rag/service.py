@@ -106,11 +106,31 @@ class RAGService:
                 await session.commit()
                 await session.refresh(doc)
                 new_version_number = 1
+
+                # Persist raw file for local tool resolution
+                try:
+                    from pathlib import Path
+                    from app.core.config import settings
+                    upload_path = Path(settings.UPLOAD_DIR).resolve()
+                    upload_path.mkdir(parents=True, exist_ok=True)
+                    ext = f".{file_type}" if file_type else ""
+                    (upload_path / f"{doc.id}{ext}").write_bytes(file_bytes)
+                except Exception as e:
+                    logger.warning(f"Failed to persist raw upload {doc.id}: {e}")
             else:
                 doc = existing_doc
                 doc.status = "PROCESSING"
                 doc.updated_at = datetime.utcnow()
                 await session.commit()
+                try:
+                    from pathlib import Path
+                    from app.core.config import settings
+                    upload_path = Path(settings.UPLOAD_DIR).resolve()
+                    upload_path.mkdir(parents=True, exist_ok=True)
+                    ext = f".{file_type}" if file_type else ""
+                    (upload_path / f"{doc.id}{ext}").write_bytes(file_bytes)
+                except Exception:
+                    pass
                 
                 # Fetch highest version number
                 from sqlalchemy import func

@@ -8,6 +8,7 @@ import { ChatWorkspace } from './pages/ChatWorkspace';
 import { Documents } from './pages/Documents';
 import { Observability } from './pages/Observability';
 import { Evaluation } from './pages/Evaluation';
+import { Agents } from './pages/Agents';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -44,12 +45,7 @@ const App: React.FC = () => {
               <Route path="documents" element={<Documents />} />
               <Route path="observability" element={<Observability />} />
               <Route path="evaluation" element={<Evaluation />} />
-              <Route path="agents" element={
-                <div style={{ padding: 48, textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                  <h2>Agents Management</h2>
-                  <p>Status indicators and configuration coming in a later track.</p>
-                </div>
-              } />
+              <Route path="agents" element={<Agents />} />
             </Route>
           </Routes>
         </GenerationProvider>

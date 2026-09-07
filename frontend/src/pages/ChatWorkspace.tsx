@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, PlusCircle, MessageSquare, Square } from 'lucide-react';
+import { Send, User, Bot, PlusCircle, MessageSquare, Square, Download } from 'lucide-react';
 import { chatApi } from '../api/chat';
 import type { Conversation, Message } from '../api/chat';
 import { agentsApi } from '../api/agents';
@@ -7,6 +7,20 @@ import type { Agent } from '../api/agents';
 import { useGeneration } from '../context/GenerationContext';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import styles from './ChatWorkspace.module.css';
+
+const getFileCardDetails = (filename: string, fileType?: string) => {
+  const ext = (fileType || filename.split('.').pop() || 'md').toLowerCase().replace(/^\./, '');
+  if (ext === 'docx') {
+    return { icon: '📝', label: 'Word Document', btnText: 'Download Word' };
+  }
+  if (ext === 'pdf') {
+    return { icon: '📕', label: 'PDF Document', btnText: 'Download PDF' };
+  }
+  if (ext === 'xlsx' || ext === 'xls') {
+    return { icon: '📊', label: 'Excel Spreadsheet', btnText: 'Download Excel' };
+  }
+  return { icon: '📄', label: 'Markdown Document', btnText: 'Download Markdown' };
+};
 
 export const ChatWorkspace: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -24,6 +38,8 @@ export const ChatWorkspace: React.FC = () => {
     streamingText,
     agentState,
     streamingSources,
+    streamingFile,
+    latestTitleUpdate,
     startGeneration,
     stopGeneration,
     generationCompletedAt
@@ -70,14 +86,33 @@ export const ChatWorkspace: React.FC = () => {
     }
   };
 
-  // Load messages when conversation changes or generation completes
+  // Real-time title update from streaming events
+  useEffect(() => {
+    if (latestTitleUpdate) {
+      setConversations(prev => prev.map(c => 
+        c.id === latestTitleUpdate.conversationId 
+          ? { ...c, title: latestTitleUpdate.title } 
+          : c
+      ));
+    }
+  }, [latestTitleUpdate]);
+
+  // Load messages when conversation changes
   useEffect(() => {
     if (activeConversationId) {
       loadMessages(activeConversationId);
     } else {
       setMessages([]);
     }
-  }, [activeConversationId, generationCompletedAt]);
+  }, [activeConversationId]);
+
+  // Refresh messages and conversations when generation completes
+  useEffect(() => {
+    if (generationCompletedAt && activeConversationId) {
+      loadMessages(activeConversationId);
+      fetchConversations();
+    }
+  }, [generationCompletedAt]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -94,8 +129,29 @@ export const ChatWorkspace: React.FC = () => {
     }
   };
 
+  const handleDownload = async (fileId: string, filename: string) => {
+    try {
+      await chatApi.downloadGeneratedFile(fileId, filename);
+    } catch (e) {
+      console.error('Failed to download generated file:', e);
+    }
+  };
+
   const handleSend = async () => {
-    if (!inputValue.trim() || !activeConversationId || !selectedAgentId || isStreaming) return;
+    if (!inputValue.trim() || !selectedAgentId || isStreaming) return;
+
+    let convId = activeConversationId;
+    if (!convId) {
+      try {
+        const conv = await chatApi.createConversation('New Conversation');
+        setConversations(prev => [conv, ...prev]);
+        setActiveConversationId(conv.id);
+        convId = conv.id;
+      } catch (e) {
+        console.error('Failed to create new conversation:', e);
+        return;
+      }
+    }
 
     const userText = inputValue.trim();
     setInputValue('');
@@ -103,7 +159,7 @@ export const ChatWorkspace: React.FC = () => {
     // Optimistic user message in UI
     const userMsg: Message = {
       id: Date.now().toString(),
-      conversation_id: activeConversationId,
+      conversation_id: convId,
       role: 'user',
       content: userText,
       created_at: new Date().toISOString()
@@ -113,17 +169,21 @@ export const ChatWorkspace: React.FC = () => {
     // Start generation managed at application level
     await startGeneration(
       selectedAgentId,
-      activeConversationId,
+      convId,
       userText,
-      (finalAnswer, sources) => {
+      (finalAnswer, sources, generatedFile) => {
         // Optimistic assistant message upon completion before DB sync
+        const meta: any = { sources };
+        if (generatedFile) {
+          meta.generated_file = generatedFile;
+        }
         setMessages(prev => [...prev, {
           id: (Date.now() + 1).toString(),
-          conversation_id: activeConversationId,
+          conversation_id: convId,
           role: 'assistant',
           content: finalAnswer,
           created_at: new Date().toISOString(),
-          metadata: { sources }
+          metadata: meta
         }]);
       }
     );
@@ -196,6 +256,33 @@ export const ChatWorkspace: React.FC = () => {
                       ) : (
                         msg.content
                       )}
+                      {(() => {
+                        const genFile = msg.metadata?.generated_file || (msg as any).metadata_?.generated_file;
+                        if (!genFile) return null;
+                        const card = getFileCardDetails(genFile.filename, genFile.file_type);
+                        return (
+                          <div className={styles.fileCard}>
+                            <div className={styles.fileInfo}>
+                              <span className={styles.fileIcon}>{card.icon}</span>
+                              <div className={styles.fileText}>
+                                <span className={styles.fileName}>{genFile.filename}</span>
+                                {genFile.size_bytes ? (
+                                  <span className={styles.fileMeta}>{Math.round(genFile.size_bytes / 1024 * 10) / 10 || 1} KB • {card.label}</span>
+                                ) : (
+                                  <span className={styles.fileMeta}>{card.label}</span>
+                                )}
+                              </div>
+                            </div>
+                            <button 
+                              className={styles.downloadBtn}
+                              onClick={() => handleDownload(genFile.file_id, genFile.filename)}
+                              title={card.btnText}
+                            >
+                              <Download size={14} /> {card.btnText}
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {msg.metadata?.sources && msg.metadata.sources.length > 0 && (
                         <div className={styles.sources}>
                           <div className={styles.sourcesTitle}>Sources</div>
@@ -232,6 +319,31 @@ export const ChatWorkspace: React.FC = () => {
                       {streamingText ? (
                         <MarkdownRenderer content={streamingText} />
                       ) : null}
+                      {streamingFile && (() => {
+                        const card = getFileCardDetails(streamingFile.filename, streamingFile.file_type);
+                        return (
+                          <div className={styles.fileCard}>
+                            <div className={styles.fileInfo}>
+                              <span className={styles.fileIcon}>{card.icon}</span>
+                              <div className={styles.fileText}>
+                                <span className={styles.fileName}>{streamingFile.filename}</span>
+                                {streamingFile.size_bytes ? (
+                                  <span className={styles.fileMeta}>{Math.round(streamingFile.size_bytes / 1024 * 10) / 10 || 1} KB • {card.label}</span>
+                                ) : (
+                                  <span className={styles.fileMeta}>{card.label}</span>
+                                )}
+                              </div>
+                            </div>
+                            <button 
+                              className={styles.downloadBtn}
+                              onClick={() => handleDownload(streamingFile.file_id, streamingFile.filename)}
+                              title={card.btnText}
+                            >
+                              <Download size={14} /> {card.btnText}
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {(!streamingText || agentState) && (
                         <div className={styles.agentState}>
                           <div className="spinner dark" style={{ width: 12, height: 12, borderWidth: 1 }}></div>

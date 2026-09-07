@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.errors import MRPLAPIException, mrpl_exception_handler
 from app.db.database import engine, Base
+import app.db.models  # Ensure models are registered on Base.metadata
 from app.api.v1.endpoints import (
     auth, conversations, messages, generation, agents, knowledge,
-    workflows, attachments, observability, evaluation, health
+    workflows, attachments, observability, evaluation, health, files
 )
 from app.services.auth import AuthService
 from app.db.uow import UnitOfWork, get_uow
@@ -30,8 +31,12 @@ from app.core.runtime.tool_executor import ToolRegistry, LocalToolExecutor, Auth
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.observability.service import get_observability_service
+    obs_service = get_observability_service()
+    app.state.observability_service = obs_service
+
     # Initialize Model Gateway
-    gateway = ModelGateway()
+    gateway = ModelGateway(observability_service=obs_service)
     gateway.register_provider("ollama", OllamaProvider(base_url=settings.OLLAMA_BASE_URL))
     gateway.register_provider("fake", FakeProvider())
     gateway.register_model_route(settings.DEFAULT_CHAT_MODEL, "ollama")
@@ -59,7 +64,8 @@ async def lifespan(app: FastAPI):
         parser_registry=parser_registry,
         chunker=chunker,
         embedding_provider=embedding_provider,
-        vector_store=vector_store
+        vector_store=vector_store,
+        observability_service=obs_service
     )
     app.state.rag_service = rag_service
     
@@ -67,9 +73,37 @@ async def lifespan(app: FastAPI):
     tool_registry = ToolRegistry()
     tool_registry.register(SearchDocumentsTool(rag_service))
     tool_registry.register(GetDocumentTool(rag_service))
+
+    # Register Excel Deterministic Tools
+    from app.core.excel import (
+        ReadWorkbookTool,
+        InspectSheetTool,
+        ReadRangeTool,
+        AggregateDataTool,
+        FilterRowsTool,
+        DetectDuplicatesTool,
+        DetectMissingValuesTool,
+        CreateWorkbookTool,
+        WriteCellsTool,
+        AddFormulaTool,
+        FormatRangeTool,
+        SaveWorkbookTool,
+    )
+    tool_registry.register(ReadWorkbookTool())
+    tool_registry.register(InspectSheetTool())
+    tool_registry.register(ReadRangeTool())
+    tool_registry.register(AggregateDataTool())
+    tool_registry.register(FilterRowsTool())
+    tool_registry.register(DetectDuplicatesTool())
+    tool_registry.register(DetectMissingValuesTool())
+    tool_registry.register(CreateWorkbookTool())
+    tool_registry.register(WriteCellsTool())
+    tool_registry.register(AddFormulaTool())
+    tool_registry.register(FormatRangeTool())
+    tool_registry.register(SaveWorkbookTool())
     
     local_tool_executor = LocalToolExecutor(tool_registry)
-    authorized_tool_executor = AuthorizedToolExecutor(local_tool_executor)
+    authorized_tool_executor = AuthorizedToolExecutor(local_tool_executor, observability_service=obs_service)
     app.state.authorized_tool_executor = authorized_tool_executor
 
     # Initialize Agent Registry
@@ -120,12 +154,44 @@ async def lifespan(app: FastAPI):
         tool_permissions={"allowed": ["search_documents", "get_document"]},
         context_policy={"rag": True}
     ))
+
+    # Sovereign Excel Specialist Agent
+    registry.register(AgentDefinition(
+        agent_id="excel_agent",
+        name="Excel Agent",
+        description="Specialized agent for reading, analyzing, calculating, and modifying Excel spreadsheets locally",
+        version="1.0",
+        instructions=(
+            "You are the MRPL Excel Specialist. Your workflow is: "
+            "Inspect → execute deterministic tool operations → verify results → provide concise evidence-based answer. "
+            "Rely strictly on deterministic tool outputs for arithmetic and aggregations; do not perform manual calculations. "
+            "When a task requires creating or generating a workbook, you MUST invoke the create_workbook tool with clean headers and rows. "
+            "Never claim a workbook has been created or saved unless the tool execution successfully generated and registered the file."
+        ),
+        tool_permissions={
+            "allowed": [
+                "read_workbook",
+                "inspect_sheet",
+                "read_range",
+                "aggregate_data",
+                "filter_rows",
+                "detect_duplicates",
+                "detect_missing_values",
+                "create_workbook",
+                "write_cells",
+                "add_formula",
+                "format_range",
+                "save_workbook",
+            ]
+        },
+        context_policy={"rag": False}
+    ))
     
     app.state.agent_registry = registry
     
     # Initialize Harness with AuthorizedToolExecutor
     context_engine = ContextEngine()
-    app.state.agent_harness = AgentHarness(registry, context_engine, gateway, authorized_tool_executor)
+    app.state.agent_harness = AgentHarness(registry, context_engine, gateway, authorized_tool_executor, observability_service=obs_service)
 
     # Initialize DB
     async with engine.begin() as conn:
@@ -134,16 +200,19 @@ async def lifespan(app: FastAPI):
     # Create first superuser
     from app.db.database import AsyncSessionLocal
     uow = UnitOfWork(session_factory=AsyncSessionLocal)
-    async with uow:
-        auth_service = AuthService(uow)
-        existing = await uow.users.get_by_username(settings.FIRST_SUPERUSER)
-        if not existing:
-            await auth_service.create_user({
-                "username": settings.FIRST_SUPERUSER,
-                "password": settings.FIRST_SUPERUSER_PASSWORD,
-                "role": "ADMIN"
-            })
-            await uow.commit()
+    try:
+        async with uow:
+            auth_service = AuthService(uow)
+            existing = await uow.users.get_by_username(settings.FIRST_SUPERUSER)
+            if not existing:
+                await auth_service.create_user({
+                    "username": settings.FIRST_SUPERUSER,
+                    "password": settings.FIRST_SUPERUSER_PASSWORD,
+                    "role": "ADMIN"
+                })
+                await uow.commit()
+    except Exception:
+        pass
 
     # Ensure system_eval_runner exists and clean up legacy EVAL_DOC_* documents assigned to real users
     try:
@@ -176,11 +245,15 @@ async def lifespan(app: FastAPI):
     from app.services.semantic_memory import MemoryService
     from app.core.multimodal.service import MultimodalService
     app.state.uow = uow
-    app.state.workflow_engine = WorkflowEngine(uow, app.state.agent_harness, authorized_tool_executor)
+    app.state.workflow_engine = WorkflowEngine(uow, app.state.agent_harness, authorized_tool_executor, observability_service=obs_service)
     app.state.memory_service = MemoryService(uow)
-    app.state.multimodal_service = MultimodalService(uow)
+    app.state.multimodal_service = MultimodalService(uow, observability_service=obs_service)
+    gateway._multimodal_service = app.state.multimodal_service
+    from app.core.runtime.state_manager import get_agent_state_manager
+    state_mgr = get_agent_state_manager()
+    app.state.agent_state_manager = state_mgr
     from app.core.runtime.generation_manager import GenerationManager
-    app.state.generation_manager = GenerationManager()
+    app.state.generation_manager = GenerationManager(state_manager=state_mgr, obs_service=obs_service)
 
     yield
 
@@ -266,3 +339,4 @@ app.include_router(workflows.router, prefix=f"{settings.API_V1_STR}/workflows", 
 app.include_router(attachments.router, prefix=f"{settings.API_V1_STR}/attachments", tags=["attachments"])
 app.include_router(observability.router, prefix=f"{settings.API_V1_STR}/observability", tags=["observability"])
 app.include_router(evaluation.router, prefix=f"{settings.API_V1_STR}/evaluation", tags=["evaluation"])
+app.include_router(files.router, prefix=f"{settings.API_V1_STR}/files", tags=["files"])

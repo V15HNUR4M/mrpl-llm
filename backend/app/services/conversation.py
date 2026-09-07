@@ -23,6 +23,10 @@ class ConversationService:
     async def list_conversations(self, user_id: str, limit: int = 20, offset: int = 0) -> List[dict]:
         return await self.uow.conversations.list_for_user(user_id, limit, offset)
 
+    async def update_conversation_title(self, conversation_id: str, user_id: str, title: str) -> dict:
+        conversation = await self.get_conversation(conversation_id, user_id)
+        return await self.uow.conversations.update(conversation, {"title": title})
+
     async def add_message(self, conversation_id: str, user_id: str, message_data: dict) -> dict:
         # Verify ownership
         await self.get_conversation(conversation_id, user_id)

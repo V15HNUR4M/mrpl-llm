@@ -53,16 +53,22 @@ export const Observability: React.FC = () => {
     return <div className={`${styles.statusIndicator} ${styles.degraded}`} />;
   };
 
-  const totalRequests = (metrics?.counters?.['model_requests_total'] || 0) +
+  const totalRequests = metrics?.counters?.['total_operations'] ??
+                        ((metrics?.counters?.['model_requests_total'] || 0) +
                         (metrics?.counters?.['tool_calls_total'] || 0) +
-                        (metrics?.counters?.['workflow_runs_total'] || 0);
+                        (metrics?.counters?.['workflow_runs_total'] || 0) +
+                        (metrics?.counters?.['agent_events_total'] || 0) +
+                        (metrics?.counters?.['rag_queries_total'] || 0));
 
-  const totalFailures = (metrics?.counters?.['model_failures_total'] || 0) +
+  const totalFailures = metrics?.counters?.['total_failures'] ??
+                        ((metrics?.counters?.['model_failures_total'] || 0) +
                         (metrics?.counters?.['tool_failures_total'] || 0) +
-                        (metrics?.counters?.['workflow_failures_total'] || 0);
+                        (metrics?.counters?.['workflow_failures_total'] || 0) +
+                        (metrics?.counters?.['agent_failures_total'] || 0));
 
-  const avgLatency = metrics?.average_latencies_ms?.['model_gateway_latency_ms'] ?? 
+  const rawLatency = metrics?.average_latencies_ms?.['model_gateway_latency_ms'] ?? 
                      metrics?.average_latencies_ms?.['model_latency_ms'] ?? 0;
+  const avgLatency = rawLatency > 0 ? Math.round(rawLatency * 10) / 10 : 0;
 
   return (
     <div className={styles.container}>

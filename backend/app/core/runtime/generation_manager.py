@@ -78,10 +78,12 @@ class GenerationManager:
     Runs generation tasks asynchronously and independently of the SSE HTTP connection.
     Ensures message persistence occurs even if the client disconnects.
     """
-    def __init__(self, max_history: int = 100):
+    def __init__(self, max_history: int = 100, state_manager=None, obs_service=None):
         self._generations: OrderedDict[str, GenerationRecord] = OrderedDict()
         self._max_history = max_history
         self._lock = asyncio.Lock()
+        self._state_manager = state_manager
+        self._obs_service = obs_service
 
     async def start_generation(
         self,
@@ -91,6 +93,7 @@ class GenerationManager:
         user_id: str,
         message: str,
         recent_candidates: list,
+        initial_title: Optional[str] = None
     ) -> GenerationRecord:
         generation_id = str(uuid.uuid4())
         record = GenerationRecord(
@@ -99,6 +102,32 @@ class GenerationManager:
             user_id=user_id,
             agent_id=agent.agent_id
         )
+
+        # Track live Running state
+        if self._state_manager:
+            self._state_manager.start_execution(agent.agent_id, generation_id)
+        if self._obs_service:
+            try:
+                from app.core.observability.schemas import TelemetryEventCreate, EVENT_AGENT_RUN_STARTED
+                asyncio.create_task(self._obs_service.emit_event(TelemetryEventCreate(
+                    event_type=EVENT_AGENT_RUN_STARTED,
+                    component="agent",
+                    agent_id=agent.agent_id,
+                    user_id=user_id,
+                    session_id=conversation_id,
+                    correlation_id=generation_id,
+                    status="running",
+                    metadata={"message_preview": message[:100], "agent_id": agent.agent_id}
+                )))
+            except Exception:
+                pass
+
+        if initial_title:
+            record.add_event({
+                "type": "title_updated",
+                "title": initial_title,
+                "conversation_id": conversation_id
+            })
 
         async with self._lock:
             # Enforce history limit
@@ -140,15 +169,33 @@ class GenerationManager:
         )
 
         final_answer = ""
+        file_metadata = None
         try:
             record.add_event({"type": "session_created", "session_id": record.generation_id})
 
             async for event in harness.stream_execute(session, message, recent_candidates):
                 if record._is_cancelled:
                     break
-                record.add_event(event)
                 if event.get("type") == "completed":
                     final_answer = event.get("final_answer", "")
+                    continue
+                record.add_event(event)
+
+                # Check for tool-generated files (e.g. SaveWorkbookTool)
+                if event.get("type") == "tool_completed":
+                    tool_res = event.get("result")
+                    if isinstance(tool_res, dict) and tool_res.get("file_id") and (tool_res.get("filename", "").endswith(".xlsx") or tool_res.get("file_type") == "xlsx"):
+                        file_metadata = {
+                            "file_id": tool_res["file_id"],
+                            "filename": tool_res["filename"],
+                            "file_type": "xlsx",
+                            "mime_type": tool_res.get("mime_type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+                            "size_bytes": tool_res.get("size_bytes", 0)
+                        }
+                        record.add_event({
+                            "type": "file_generated",
+                            "file": file_metadata
+                        })
 
             if record._is_cancelled:
                 record.status = "cancelled"
@@ -158,30 +205,127 @@ class GenerationManager:
 
             final_text = final_answer or record.partial_content
             if final_text:
+                if not file_metadata:
+                    try:
+                        from app.services.file_export import (
+                            detect_file_generation_request,
+                            derive_filename,
+                            GeneratedFileManager,
+                            export_to_markdown,
+                            export_to_docx,
+                            export_to_pdf,
+                        )
+                        req = detect_file_generation_request(message)
+                        if req["requested"]:
+                            file_mgr = GeneratedFileManager()
+                            fmt = req["format"]
+                            if fmt == "docx":
+                                filename = derive_filename(message, ext=".docx")
+                                docx_bytes = export_to_docx(final_text)
+                                saved_info = await file_mgr.save_file(
+                                    owner_id=record.user_id,
+                                    conversation_id=record.conversation_id,
+                                    filename=filename,
+                                    content_bytes=docx_bytes,
+                                    file_type="docx"
+                                )
+                                file_metadata = saved_info
+                            elif fmt == "pdf":
+                                filename = derive_filename(message, ext=".pdf")
+                                pdf_bytes = export_to_pdf(final_text)
+                                saved_info = await file_mgr.save_file(
+                                    owner_id=record.user_id,
+                                    conversation_id=record.conversation_id,
+                                    filename=filename,
+                                    content_bytes=pdf_bytes,
+                                    file_type="pdf"
+                                )
+                                file_metadata = saved_info
+                            elif fmt == "markdown":
+                                filename = derive_filename(message, ext=".md")
+                                saved_info = await file_mgr.save_markdown_file(
+                                    owner_id=record.user_id,
+                                    conversation_id=record.conversation_id,
+                                    filename=filename,
+                                    content=final_text
+                                )
+                                file_metadata = saved_info
+                            elif fmt == "xlsx":
+                                from app.core.excel.writers import create_workbook, save_workbook
+                                from app.core.excel.table_parser import extract_tabular_data
+                                filename = derive_filename(message, ext=".xlsx")
+                                headers, rows = extract_tabular_data(final_text, session_events=record.events, user_input=message)
+                                created = create_workbook(sheet_name="Data", headers=headers, rows=rows)
+                                saved_info = await save_workbook(
+                                    file_id=created["staging_file_id"],
+                                    output_filename=filename,
+                                    owner_id=record.user_id,
+                                    conversation_id=record.conversation_id
+                                )
+                                file_metadata = saved_info
+
+                            if file_metadata:
+                                record.add_event({
+                                    "type": "file_generated",
+                                    "file": file_metadata
+                                })
+                    except Exception as e:
+                        logger.error(f"Multi-format file export error: {e}")
+
                 # Authoritative SQLite persistence - MUST succeed even if client disconnected
                 new_uow = UnitOfWork(session_factory=AsyncSessionLocal)
                 async with new_uow:
                     new_conv_service = ConversationService(new_uow)
+                    msg_payload = {
+                        "role": "assistant",
+                        "content": final_text,
+                        "agent_id": agent.agent_id
+                    }
+                    if file_metadata:
+                        msg_payload["metadata_"] = {"generated_file": file_metadata}
                     saved = await new_conv_service.add_message(
                         record.conversation_id,
                         record.user_id,
-                        {
-                            "role": "assistant",
-                            "content": final_text,
-                            "agent_id": agent.agent_id
-                        }
+                        msg_payload
                     )
                     if saved:
                         record.message_id = saved.id
                 
+            record.add_event({
+                "type": "completed",
+                "final_answer": final_text
+            })
             record.status = "completed"
             record.completed_at = datetime.now(timezone.utc)
+
+            # Mark state manager completed (Ready)
+            if self._state_manager:
+                self._state_manager.complete_execution(agent.agent_id, record.generation_id, success=True)
+            if self._obs_service:
+                try:
+                    dur_ms = int((record.completed_at - record.started_at).total_seconds() * 1000) if record.started_at else None
+                    from app.core.observability.schemas import TelemetryEventCreate, EVENT_AGENT_RUN_COMPLETED
+                    asyncio.create_task(self._obs_service.emit_event(TelemetryEventCreate(
+                        event_type=EVENT_AGENT_RUN_COMPLETED,
+                        component="agent",
+                        agent_id=agent.agent_id,
+                        user_id=record.user_id,
+                        session_id=record.conversation_id,
+                        correlation_id=record.generation_id,
+                        status="success",
+                        duration_ms=dur_ms,
+                        metadata={"agent_id": agent.agent_id, "final_answer_length": len(final_text)}
+                    )))
+                except Exception:
+                    pass
 
         except asyncio.CancelledError:
             record.status = "cancelled"
             record.completed_at = datetime.now(timezone.utc)
             record.add_event({"type": "error", "error": "Generation cancelled by user"})
             logger.info(f"Generation {record.generation_id} cancelled")
+            if self._state_manager:
+                self._state_manager.complete_execution(agent.agent_id, record.generation_id, success=True)
 
         except Exception as e:
             record.status = "failed"
@@ -189,6 +333,28 @@ class GenerationManager:
             record.completed_at = datetime.now(timezone.utc)
             record.add_event({"type": "error", "error": str(e)})
             logger.error(f"Generation {record.generation_id} failed: {e}", exc_info=True)
+
+            # Mark state manager failed (Error)
+            if self._state_manager:
+                self._state_manager.complete_execution(agent.agent_id, record.generation_id, success=False)
+            if self._obs_service:
+                try:
+                    dur_ms = int((record.completed_at - record.started_at).total_seconds() * 1000) if record.started_at else None
+                    from app.core.observability.schemas import TelemetryEventCreate, EVENT_AGENT_RUN_FAILED
+                    asyncio.create_task(self._obs_service.emit_event(TelemetryEventCreate(
+                        event_type=EVENT_AGENT_RUN_FAILED,
+                        component="agent",
+                        agent_id=agent.agent_id,
+                        user_id=record.user_id,
+                        session_id=record.conversation_id,
+                        correlation_id=record.generation_id,
+                        status="failure",
+                        duration_ms=dur_ms,
+                        error_type=type(e).__name__,
+                        metadata={"agent_id": agent.agent_id, "error": str(e)}
+                    )))
+                except Exception:
+                    pass
 
     async def get_active_generation(
         self,

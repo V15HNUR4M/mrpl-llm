@@ -1,3 +1,7 @@
+import os
+os.environ.setdefault("SECRET_KEY", "test-secret-key-12345-67890-test-dev")
+os.environ.setdefault("ENVIRONMENT", "testing")
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport

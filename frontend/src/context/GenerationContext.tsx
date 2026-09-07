@@ -9,7 +9,9 @@ export type StreamingEvent =
   | { type: 'tool_execution_started', tool: string, arguments: any }
   | { type: 'tool_completed', tool: string, result: any, status: string }
   | { type: 'context_candidate', candidate: any }
-  | { type: 'completed', final_answer: string }
+  | { type: 'title_updated', title: string, conversation_id: string }
+  | { type: 'file_generated', file: any }
+  | { type: 'completed', final_answer: string, generated_file?: any }
   | { type: 'error', error: string };
 
 interface GenerationContextType {
@@ -20,12 +22,14 @@ interface GenerationContextType {
   streamingText: string;
   agentState: string;
   streamingSources: any[];
+  streamingFile: any | null;
+  latestTitleUpdate: { conversationId: string; title: string } | null;
   generationId: string | null;
   startGeneration: (
     agentId: string, 
     conversationId: string, 
     message: string,
-    onCompleted?: (finalAnswer: string, sources: any[]) => void
+    onCompleted?: (finalAnswer: string, sources: any[], generatedFile?: any) => void
   ) => Promise<void>;
   stopGeneration: () => Promise<void>;
   generationCompletedAt: number;
@@ -50,6 +54,8 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [streamingText, setStreamingText] = useState('');
   const [agentState, setAgentState] = useState('');
   const [streamingSources, setStreamingSources] = useState<any[]>([]);
+  const [streamingFile, setStreamingFile] = useState<any | null>(null);
+  const [latestTitleUpdate, setLatestTitleUpdate] = useState<{ conversationId: string; title: string } | null>(null);
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [generationCompletedAt, setGenerationCompletedAt] = useState<number>(0);
 
@@ -111,14 +117,16 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     agentId: string, 
     conversationId: string, 
     message: string,
-    onCompleted?: (finalAnswer: string, sources: any[]) => void
+    onCompleted?: (finalAnswer: string, sources: any[], generatedFile?: any) => void
   ) => {
     setIsStreaming(true);
     setStreamingConversationId(conversationId);
     setStreamingText('');
     setAgentState('Initializing...');
     setStreamingSources([]);
+    setStreamingFile(null);
     const accumulatedSources: any[] = [];
+    let accumulatedFile: any = null;
     let fullText = '';
 
     try {
@@ -164,10 +172,18 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                       setStreamingSources([...accumulatedSources]);
                     }
                     break;
+                  case 'title_updated':
+                    setLatestTitleUpdate({ conversationId: event.conversation_id, title: event.title });
+                    break;
+                  case 'file_generated':
+                    accumulatedFile = event.file;
+                    setStreamingFile(event.file);
+                    break;
                   case 'completed': {
                     const finalAnswer = event.final_answer || fullText;
+                    const finalFile = accumulatedFile || event.generated_file;
                     if (onCompleted) {
-                      onCompleted(finalAnswer, accumulatedSources);
+                      onCompleted(finalAnswer, accumulatedSources, finalFile);
                     }
                     setGenerationCompletedAt(Date.now());
                     break;
@@ -207,6 +223,8 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       streamingText,
       agentState,
       streamingSources,
+      streamingFile,
+      latestTitleUpdate,
       generationId,
       startGeneration,
       stopGeneration,

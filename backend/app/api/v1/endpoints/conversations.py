@@ -3,7 +3,9 @@ from typing import List
 
 from app.db.uow import UnitOfWork, get_uow
 from app.services.conversation import ConversationService
-from app.schemas.conversation import ConversationCreate, ConversationResponse, PaginatedConversationResponse
+from app.schemas.conversation import (
+    ConversationCreate, ConversationUpdate, ConversationResponse, PaginatedConversationResponse
+)
 from app.dependencies import get_current_user
 from app.db.models import User
 
@@ -43,3 +45,24 @@ async def get_conversation(
     async with uow:
         service = ConversationService(uow)
         return await service.get_conversation(conversation_id, current_user.id)
+
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+async def update_conversation(
+    conversation_id: str,
+    conv_in: ConversationUpdate,
+    current_user: User = Depends(get_current_user),
+    uow: UnitOfWork = Depends(get_uow)
+):
+    async with uow:
+        service = ConversationService(uow)
+        conv = await service.get_conversation(conversation_id, current_user.id)
+        update_data = {}
+        if conv_in.title is not None:
+            update_data["title"] = conv_in.title
+        if conv_in.status is not None:
+            update_data["status"] = conv_in.status
+        if conv_in.metadata_ is not None:
+            update_data["metadata_"] = conv_in.metadata_
+        updated = await uow.conversations.update(conv, update_data)
+        await uow.commit()
+        return updated
