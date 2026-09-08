@@ -20,9 +20,6 @@ async def app_lifespan():
     
     async with lifespan(app):
         yield
-        
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
 
 @pytest_asyncio.fixture
 async def async_client():

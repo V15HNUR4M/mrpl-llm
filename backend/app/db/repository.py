@@ -1,7 +1,7 @@
-from typing import Generic, TypeVar, Type, Optional, List, Any
+from typing import Generic, TypeVar, Type, Optional, List, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import delete, update
+from sqlalchemy import delete, update, func, or_
 
 ModelType = TypeVar("ModelType")
 
@@ -45,6 +45,48 @@ class UserRepository(BaseRepository[User]):
     async def get_by_username(self, username: str) -> Optional[User]:
         result = await self.session.execute(select(self.model).filter(self.model.username == username))
         return result.scalars().first()
+
+    async def get_by_email(self, email: str) -> Optional[User]:
+        if not email:
+            return None
+        result = await self.session.execute(select(self.model).filter(self.model.email == email))
+        return result.scalars().first()
+
+    async def list_users(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        role: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        search: Optional[str] = None
+    ) -> Tuple[List[User], int]:
+        stmt = select(self.model)
+        count_stmt = select(func.count(self.model.id))
+
+        if role:
+            stmt = stmt.filter(self.model.role == role.upper())
+            count_stmt = count_stmt.filter(self.model.role == role.upper())
+        if is_active is not None:
+            stmt = stmt.filter(self.model.is_active == is_active)
+            count_stmt = count_stmt.filter(self.model.is_active == is_active)
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            filter_search = or_(
+                self.model.username.ilike(term),
+                self.model.email.ilike(term),
+                self.model.display_name.ilike(term)
+            )
+            stmt = stmt.filter(filter_search)
+            count_stmt = count_stmt.filter(filter_search)
+
+        count_res = await self.session.execute(count_stmt)
+        total = count_res.scalar() or 0
+
+        stmt = stmt.order_by(self.model.created_at.desc()).limit(limit).offset(offset)
+        res = await self.session.execute(stmt)
+        items = list(res.scalars().all())
+
+        return items, total
 
 class ConversationRepository(BaseRepository[Conversation]):
     def __init__(self, session: AsyncSession):

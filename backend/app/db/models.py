@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Boolean, DateTime, Text, Integer, ForeignKey, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Text, Integer, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -86,6 +86,9 @@ class AuditEvent(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "checksum", name="uix_document_owner_checksum"),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     owner_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True)
@@ -93,7 +96,7 @@ class Document(Base):
     file_type = Column(String, nullable=True)
     mime_type = Column(String, nullable=True)
     file_size = Column(Integer, nullable=False, default=0)
-    checksum = Column(String, unique=True, index=True, nullable=False)
+    checksum = Column(String, index=True, nullable=False)
     access_scope = Column(String, nullable=False, default="PRIVATE")
     status = Column(String, nullable=False, default="UPLOADED")
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)

@@ -224,8 +224,18 @@ async def test_require_admin_dependency_unit(user_a: User, admin_user: User):
     assert passed_admin.id == admin_user.id
 
 @pytest.mark.asyncio
-async def test_registration_creates_standard_user(async_client: AsyncClient):
+async def test_registration_creates_standard_user(async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     uname = f"newuser_{uuid.uuid4().hex[:6]}"
+    # 1. Blocked when public registration is disabled
+    monkeypatch.setattr(settings, "ENABLE_PUBLIC_REGISTRATION", False)
+    resp = await async_client.post(
+        f"{settings.API_V1_STR}/auth/register",
+        json={"username": uname, "password": "SecurePassword123!", "email": f"{uname}@example.com"}
+    )
+    assert resp.status_code == 403
+
+    # 2. Permitted when explicitly enabled by configuration
+    monkeypatch.setattr(settings, "ENABLE_PUBLIC_REGISTRATION", True)
     resp = await async_client.post(
         f"{settings.API_V1_STR}/auth/register",
         json={"username": uname, "password": "SecurePassword123!", "email": f"{uname}@example.com"}

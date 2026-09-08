@@ -35,6 +35,12 @@ async def register(
     user_in: UserCreate,
     uow: UnitOfWork = Depends(get_uow)
 ):
+    if not settings.ENABLE_PUBLIC_REGISTRATION:
+        raise MRPLAPIException(
+            code="REGISTRATION_DISABLED",
+            message="Public self-registration is disabled. Please contact your system administrator to obtain an account.",
+            status_code=403
+        )
     async with uow:
         auth_service = AuthService(uow)
         user = await auth_service.create_user(user_in.model_dump())

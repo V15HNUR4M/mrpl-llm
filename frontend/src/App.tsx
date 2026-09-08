@@ -9,6 +9,7 @@ import { Documents } from './pages/Documents';
 import { Observability } from './pages/Observability';
 import { Evaluation } from './pages/Evaluation';
 import { Agents } from './pages/Agents';
+import { Users } from './pages/Users';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -23,6 +24,28 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+  
+  return <>{children}</>;
+};
+
+const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--color-surface-sunken)' }}>
+        <div className="spinner dark"></div>
+      </div>
+    );
+  }
+  
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user.role !== 'ADMIN') {
+    return <Navigate to="/" replace />;
   }
   
   return <>{children}</>;
@@ -46,6 +69,11 @@ const App: React.FC = () => {
               <Route path="observability" element={<Observability />} />
               <Route path="evaluation" element={<Evaluation />} />
               <Route path="agents" element={<Agents />} />
+              <Route path="users" element={
+                <AdminRoute>
+                  <Users />
+                </AdminRoute>
+              } />
             </Route>
           </Routes>
         </GenerationProvider>

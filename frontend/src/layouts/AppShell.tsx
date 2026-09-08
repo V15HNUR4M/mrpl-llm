@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Database, Bot, LogOut, Activity, ShieldCheck, Cpu } from 'lucide-react';
+import { MessageSquare, Database, Bot, LogOut, Activity, ShieldCheck, Cpu, Users as UsersIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import styles from './AppShell.module.css';
 
@@ -72,6 +72,15 @@ export const AppShell: React.FC = () => {
             <Bot className={styles.navIcon} size={18} />
             <span className={styles.navLabel}>Agents</span>
           </NavLink>
+          {user?.role === 'ADMIN' && (
+            <NavLink 
+              to="/users" 
+              className={({ isActive }) => `${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
+            >
+              <UsersIcon className={styles.navIcon} size={18} />
+              <span className={styles.navLabel}>User Management</span>
+            </NavLink>
+          )}
         </nav>
 
         <div className={styles.systemStatus}>

@@ -8,7 +8,7 @@ from app.db.database import engine, Base
 import app.db.models  # Ensure models are registered on Base.metadata
 from app.api.v1.endpoints import (
     auth, conversations, messages, generation, agents, knowledge,
-    workflows, attachments, observability, evaluation, health, files
+    workflows, attachments, observability, evaluation, health, files, users
 )
 from app.services.auth import AuthService
 from app.db.uow import UnitOfWork, get_uow
@@ -196,8 +196,20 @@ async def lifespan(app: FastAPI):
     # Initialize DB
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Safe migration for user-scoped checksum uniqueness in SQLite
+        try:
+            from sqlalchemy import text
+            res = await conn.execute(text("SELECT sql FROM sqlite_master WHERE type='index' AND name='ix_documents_checksum'"))
+            row = res.fetchone()
+            if row and row[0] and "UNIQUE" in row[0].upper():
+                await conn.execute(text("DROP INDEX IF EXISTS ix_documents_checksum"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_checksum ON documents (checksum)"))
+            await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uix_document_owner_checksum ON documents (owner_id, checksum)"))
+        except Exception as mig_err:
+            import logging
+            logging.getLogger("mrpl.db").warning("Index migration check: %s", mig_err)
         
-    # Create first superuser
+    # Create or update first superuser
     from app.db.database import AsyncSessionLocal
     uow = UnitOfWork(session_factory=AsyncSessionLocal)
     try:
@@ -205,14 +217,19 @@ async def lifespan(app: FastAPI):
             auth_service = AuthService(uow)
             existing = await uow.users.get_by_username(settings.FIRST_SUPERUSER)
             if not existing:
-                await auth_service.create_user({
+                await auth_service.create_user_by_admin({
                     "username": settings.FIRST_SUPERUSER,
                     "password": settings.FIRST_SUPERUSER_PASSWORD,
-                    "role": "ADMIN"
+                    "role": "ADMIN",
+                    "is_active": True
                 })
                 await uow.commit()
-    except Exception:
-        pass
+            elif existing.role != "ADMIN":
+                await uow.users.update(existing, {"role": "ADMIN"})
+                await uow.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger("mrpl.main").error(f"Superuser bootstrap error: {e}")
 
     # Ensure system_eval_runner exists and clean up legacy EVAL_DOC_* documents assigned to real users
     try:
@@ -340,3 +357,4 @@ app.include_router(attachments.router, prefix=f"{settings.API_V1_STR}/attachment
 app.include_router(observability.router, prefix=f"{settings.API_V1_STR}/observability", tags=["observability"])
 app.include_router(evaluation.router, prefix=f"{settings.API_V1_STR}/evaluation", tags=["evaluation"])
 app.include_router(files.router, prefix=f"{settings.API_V1_STR}/files", tags=["files"])
+app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["users"])

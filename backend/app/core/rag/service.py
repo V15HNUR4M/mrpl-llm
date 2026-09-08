@@ -65,23 +65,30 @@ class RAGService:
 
         checksum = self._calculate_checksum(file_bytes)
 
-        # 1. Idempotency Check
+        # 1. Idempotency Check (User-scoped by checksum)
         async with AsyncSessionLocal() as session:
+            stmt_checksum = select(Document).where(
+                Document.checksum == checksum,
+                Document.owner_id == owner_id
+            )
+            res_checksum = await session.execute(stmt_checksum)
+            existing_by_checksum = res_checksum.scalars().first()
+
+            if existing_by_checksum and existing_by_checksum.status == "INDEXED":
+                return IngestionResult(
+                    document_id=existing_by_checksum.id,
+                    document_version_id="", # Skipped for idempotent returns
+                    status="SKIPPED",
+                    chunks_processed=0,
+                    message="Document with identical content already indexed."
+                )
+
             stmt = select(Document).where(
                 Document.filename == filename,
                 Document.owner_id == owner_id
             )
             result = await session.execute(stmt)
             existing_doc = result.scalars().first()
-
-            if existing_doc and existing_doc.checksum == checksum and existing_doc.status == "INDEXED":
-                return IngestionResult(
-                    document_id=existing_doc.id,
-                    document_version_id="", # We skip this for idempotent returns where not strictly needed or fetch it
-                    status="SKIPPED",
-                    chunks_processed=0,
-                    message="Document with identical content already indexed."
-                )
             
             # 2. Extract and Parse
             parser = self.parser_registry.get_parser(mime_type, file_type)
@@ -107,14 +114,21 @@ class RAGService:
                 await session.refresh(doc)
                 new_version_number = 1
 
-                # Persist raw file for local tool resolution
+                # Persist raw file and companion metadata for local tool resolution
                 try:
+                    import json
                     from pathlib import Path
                     from app.core.config import settings
                     upload_path = Path(settings.UPLOAD_DIR).resolve()
                     upload_path.mkdir(parents=True, exist_ok=True)
                     ext = f".{file_type}" if file_type else ""
                     (upload_path / f"{doc.id}{ext}").write_bytes(file_bytes)
+                    (upload_path / f"{doc.id}.json").write_text(json.dumps({
+                        "file_id": doc.id,
+                        "owner_id": owner_id,
+                        "filename": filename,
+                        "file_type": file_type
+                    }), encoding="utf-8")
                 except Exception as e:
                     logger.warning(f"Failed to persist raw upload {doc.id}: {e}")
             else:
@@ -123,12 +137,19 @@ class RAGService:
                 doc.updated_at = datetime.utcnow()
                 await session.commit()
                 try:
+                    import json
                     from pathlib import Path
                     from app.core.config import settings
                     upload_path = Path(settings.UPLOAD_DIR).resolve()
                     upload_path.mkdir(parents=True, exist_ok=True)
                     ext = f".{file_type}" if file_type else ""
                     (upload_path / f"{doc.id}{ext}").write_bytes(file_bytes)
+                    (upload_path / f"{doc.id}.json").write_text(json.dumps({
+                        "file_id": doc.id,
+                        "owner_id": owner_id,
+                        "filename": filename,
+                        "file_type": file_type
+                    }), encoding="utf-8")
                 except Exception:
                     pass
                 

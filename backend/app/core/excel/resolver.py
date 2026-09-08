@@ -51,15 +51,36 @@ def resolve_excel_file_path(file_id: str, owner_id: Optional[str] = None) -> Pat
     if not target_path:
         raise FileNotFoundError(f"Workbook with ID '{file_id}' not found in authorized storage.")
 
-    # Owner validation if metadata companion exists
-    meta_path = target_path.parent / f"{file_id}.json"
-    if meta_path.exists() and owner_id:
-        import json
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if meta.get("owner_id") and meta.get("owner_id") != owner_id:
-                raise PermissionError("Access denied: You do not own this file.")
-        except json.JSONDecodeError:
-            pass
+    # Owner validation: Check metadata companion or SQLite Document table
+    if owner_id:
+        meta_path = target_path.parent / f"{file_id}.json"
+        if meta_path.exists():
+            import json
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if meta.get("owner_id") and meta.get("owner_id") != owner_id:
+                    raise PermissionError("Access denied: You do not own this file.")
+            except json.JSONDecodeError:
+                pass
+        elif target_path.is_relative_to(upload_dir):
+            # Authoritative check against SQLite documents table
+            try:
+                import sqlite3
+                db_url = settings.SQLITE_URL
+                db_path = db_url.split(":///")[-1] if db_url.startswith("sqlite") else ""
+                if db_path and not db_path.startswith(":memory:") and os.path.exists(db_path):
+                    conn = sqlite3.connect(db_path)
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("SELECT owner_id FROM documents WHERE id = ?", (file_id,))
+                        row = cur.fetchone()
+                        if row and row[0] and row[0] != owner_id:
+                            raise PermissionError("Access denied: You do not own this uploaded document.")
+                    finally:
+                        conn.close()
+            except PermissionError:
+                raise
+            except Exception:
+                pass
 
     return target_path
