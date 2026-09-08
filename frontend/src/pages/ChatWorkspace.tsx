@@ -104,8 +104,13 @@ export const ChatWorkspace: React.FC = () => {
     try {
       const data = await chatApi.getConversations();
       setConversations(data);
-      if (data.length > 0 && !activeConversationId) {
-        setActiveConversationId(data[0].id);
+      if (data.length > 0) {
+        if (!activeConversationId || !data.some(c => c.id === activeConversationId)) {
+          setActiveConversationId(data[0].id);
+        }
+      } else {
+        setActiveConversationId(null);
+        setMessages([]);
       }
     } catch (e) {
       console.error(e);
@@ -135,6 +140,7 @@ export const ChatWorkspace: React.FC = () => {
       setMessages(data);
     } catch (e) {
       console.error(e);
+      setMessages([]);
     }
   };
 

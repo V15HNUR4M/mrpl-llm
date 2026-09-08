@@ -2,13 +2,16 @@ import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { MessageSquare, Database, Bot, LogOut, Activity, ShieldCheck, Cpu, Users as UsersIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useGeneration } from '../context/GenerationContext';
 import styles from './AppShell.module.css';
 
 export const AppShell: React.FC = () => {
   const { user, logout } = useAuth();
+  const { resetGenerationState } = useGeneration();
   const navigate = useNavigate();
 
   const handleLogout = () => {
+    resetGenerationState();
     logout();
     navigate('/login');
   };

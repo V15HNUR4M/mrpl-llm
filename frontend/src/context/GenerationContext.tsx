@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import { agentsApi } from '../api/agents';
+import { useAuth } from './AuthContext';
 
 export type StreamingEvent = 
   | { type: 'session_created', session_id: string }
@@ -32,6 +33,7 @@ interface GenerationContextType {
     onCompleted?: (finalAnswer: string, sources: any[], generatedFile?: any) => void
   ) => Promise<void>;
   stopGeneration: () => Promise<void>;
+  resetGenerationState: () => void;
   generationCompletedAt: number;
 }
 
@@ -48,6 +50,7 @@ const formatAgentState = (state: string) => {
 };
 
 export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
@@ -61,6 +64,7 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const activeGenIdRef = useRef<string | null>(null);
+  const prevUserIdRef = useRef<string | null>(null);
 
   // Check backend for active generation on mount
   useEffect(() => {
@@ -85,6 +89,36 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     checkActive();
     return () => { isMounted = false; };
   }, []);
+
+  const resetGenerationState = useCallback(() => {
+    if (readerRef.current) {
+      try {
+        readerRef.current.cancel();
+      } catch (e) {
+        // ignore
+      }
+      readerRef.current = null;
+    }
+    setActiveConversationId(null);
+    setIsStreaming(false);
+    setStreamingConversationId(null);
+    setStreamingText('');
+    setAgentState('');
+    setStreamingSources([]);
+    setStreamingFile(null);
+    setLatestTitleUpdate(null);
+    setGenerationId(null);
+    activeGenIdRef.current = null;
+    setGenerationCompletedAt(0);
+  }, []);
+
+  useEffect(() => {
+    const currentUserId = user?.id || null;
+    if (prevUserIdRef.current !== null && prevUserIdRef.current !== currentUserId) {
+      resetGenerationState();
+    }
+    prevUserIdRef.current = currentUserId;
+  }, [user?.id, resetGenerationState]);
 
   const stopGeneration = useCallback(async () => {
     const currentGenId = activeGenIdRef.current || generationId;
@@ -228,6 +262,7 @@ export const GenerationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       generationId,
       startGeneration,
       stopGeneration,
+      resetGenerationState,
       generationCompletedAt
     }}>
       {children}

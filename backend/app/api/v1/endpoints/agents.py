@@ -700,6 +700,12 @@ async def get_active_generation(
     if not record:
         return {"active": False, "generation": None}
         
+    return {
+        "active": True,
+        "generation": record.to_dict(),
+        "events": record.events_history
+    }
+
 @router.get("/generations/{generation_id}/stream")
 async def subscribe_generation_stream(
     request: Request,

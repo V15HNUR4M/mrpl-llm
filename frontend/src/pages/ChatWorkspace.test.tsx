@@ -43,7 +43,7 @@ describe('ChatWorkspace UI', () => {
     vi.clearAllMocks();
     mockState = {
       activeConversationId: 'c1',
-      setActiveConversationId: vi.fn(),
+      setActiveConversationId: vi.fn((id: any) => { mockState.activeConversationId = id; }),
       isStreaming: false,
       streamingConversationId: null,
       streamingText: '',
@@ -258,5 +258,29 @@ describe('ChatWorkspace UI', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Network error deleting conversation');
     expect(screen.getByText('Undelatable Conversation')).toBeInTheDocument();
+  });
+
+  it('replaces a stale foreign conversation ID with user first conversation', async () => {
+    mockState.activeConversationId = 'foreign-admin-conv-id';
+    const { chatApi } = await import('../api/chat');
+    vi.mocked(chatApi.getConversations).mockResolvedValueOnce([
+      { id: 'user-conv-1', title: 'User Conversation', created_at: '', updated_at: '' }
+    ]);
+
+    render(<ChatWorkspace />);
+
+    expect(await screen.findByText('User Conversation')).toBeInTheDocument();
+    expect(mockState.setActiveConversationId).toHaveBeenCalledWith('user-conv-1');
+  });
+
+  it('clears activeConversationId to null when user has no conversations', async () => {
+    mockState.activeConversationId = 'foreign-admin-conv-id';
+    const { chatApi } = await import('../api/chat');
+    vi.mocked(chatApi.getConversations).mockResolvedValueOnce([]);
+
+    render(<ChatWorkspace />);
+
+    expect(await screen.findByText('Welcome to MRPL AI Workbench')).toBeInTheDocument();
+    expect(mockState.setActiveConversationId).toHaveBeenCalledWith(null);
   });
 });
